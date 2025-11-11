@@ -25,14 +25,16 @@ Nonparametric distributional regression using LightGBM. Predicts full probabilit
 ## Installation
 
 ```bash
-pip install numpy scikit-learn lightgbm scipy
+pip install distribution-regressor
 ```
+
+This will automatically install all dependencies (numpy, scipy, scikit-learn, lightgbm).
 
 ## Quick Start
 
 ```python
 import numpy as np
-from contrastive_LGBM_regression import DistributionRegressor
+from distribution_regressor import DistributionRegressor
 
 # Your data
 X_train, y_train = ...  
@@ -292,7 +294,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from contrastive_LGBM_regression import DistributionRegressor
+from distribution_regressor import DistributionRegressor
 
 # Generate data with heteroscedastic noise
 np.random.seed(42)
