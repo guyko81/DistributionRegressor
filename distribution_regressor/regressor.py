@@ -668,3 +668,69 @@ class DistributionRegressor:
             samples[i] = y_grid[sampled_indices]
         
         return samples
+
+    def negative_log_likelihood(self, X, y_true, y_grid: Optional[np.ndarray] = None, 
+                                bandwidth: Optional[float] = None):
+        """
+        Calculate the negative log-likelihood (NLL) of the true targets under the predicted distributions.
+        
+        Lower NLL indicates better probability assignment to the true targets.
+        NLL is the primary evaluation metric for probabilistic models.
+        
+        Args:
+            X: (n, d) feature array
+            y_true: (n,) array of true target values
+            y_grid: Optional y-grid. If None, creates a default grid.
+            bandwidth: Optional bandwidth for kernel density estimation. If provided,
+                      interpolates probabilities around y_true. If None, uses nearest grid point.
+        
+        Returns:
+            nll: Scalar negative log-likelihood (lower is better)
+            nll_per_sample: (n,) array of NLL for each sample
+        """
+        if y_grid is None:
+            y_grid = self._create_default_grid()
+        
+        y_true = np.asarray(y_true).ravel()
+        probs = self.predict_distribution(X, y_grid)
+        
+        # Get probability mass at or near y_true
+        if bandwidth is None:
+            # Use nearest grid point
+            idx = np.abs(y_grid[None, :] - y_true[:, None]).argmin(axis=1)
+            p_true = probs[np.arange(len(y_true)), idx]
+        else:
+            # Use kernel density: sum probability weighted by Gaussian kernel
+            # This provides smoother estimates when y_true falls between grid points
+            distances = np.abs(y_grid[None, :] - y_true[:, None])
+            weights = np.exp(-0.5 * (distances / bandwidth) ** 2)
+            weights = weights / weights.sum(axis=1, keepdims=True)
+            p_true = (probs * weights).sum(axis=1)
+        
+        # Clip to avoid log(0)
+        p_true = np.clip(p_true, 1e-10, 1.0)
+        
+        # Compute negative log-likelihood
+        nll_per_sample = -np.log(p_true)
+        nll = nll_per_sample.mean()
+        
+        return nll, nll_per_sample
+    
+    def score(self, X, y_true, y_grid: Optional[np.ndarray] = None, bandwidth: Optional[float] = None):
+        """
+        Compute the negative of the negative log-likelihood for scikit-learn compatibility.
+        
+        This allows the model to be used with scikit-learn's cross-validation and
+        model selection tools, which expect higher scores to be better.
+        
+        Args:
+            X: (n, d) feature array
+            y_true: (n,) array of true target values
+            y_grid: Optional y-grid. If None, creates a default grid.
+            bandwidth: Optional bandwidth for probability estimation.
+        
+        Returns:
+            score: Negative NLL (higher is better, compatible with sklearn)
+        """
+        nll, _ = self.negative_log_likelihood(X, y_true, y_grid=y_grid, bandwidth=bandwidth)
+        return -nll

@@ -236,6 +236,55 @@ sample_stds = samples.std(axis=1)
 sample_q95 = np.percentile(samples, 95, axis=1)
 ```
 
+### Evaluation
+
+#### Negative Log-Likelihood
+
+```python
+nll, nll_per_sample = model.negative_log_likelihood(X, y_true, y_grid=None, bandwidth=None)
+```
+
+Evaluates the quality of predicted probability distributions by measuring how well they assign probability mass to the true target values. This is the standard evaluation metric for probabilistic regression models.
+
+**Args:**
+- `X`: (n, d) feature array
+- `y_true`: (n,) true target values
+- `y_grid`: Optional grid of y-values (auto-generated if None)
+- `bandwidth`: Optional kernel bandwidth for probability smoothing
+
+**Returns:**
+- `nll`: Mean negative log-likelihood across all samples
+- `nll_per_sample`: (n,) array of per-sample NLL values
+
+Lower values indicate better probabilistic predictions.
+
+**Examples:**
+```python
+# Evaluate on test set
+nll, nll_per_sample = model.negative_log_likelihood(X_test, y_test)
+
+# With bandwidth smoothing for improved robustness
+nll_smooth, _ = model.negative_log_likelihood(X_test, y_test, bandwidth=0.1)
+
+# Analyze per-sample performance
+worst_predictions = np.argsort(nll_per_sample)[-10:]
+```
+
+#### Model Scoring
+
+```python
+score = model.score(X, y_true, y_grid=None, bandwidth=None)
+```
+
+Returns the negative of negative log-likelihood for scikit-learn compatibility. Higher values indicate better model performance. This enables integration with scikit-learn's model selection utilities.
+
+**Example:**
+```python
+from sklearn.model_selection import cross_val_score
+
+scores = cross_val_score(model, X, y, cv=5, scoring=None)
+```
+
 ## Complete Example
 
 ```python
@@ -475,15 +524,15 @@ If you use this in your research, please cite:
 ```bibtex
 @software{distributionregressor2025,
   title={DistributionRegressor: Nonparametric Distributional Regression},
-  author={Your Name},
+  author={Gabor Gulyas},
   year={2025},
-  url={https://github.com/yourusername/DistributionRegressor}
+  url={https://github.com/guyko81/DistributionRegressor}
 }
 ```
 
 ## License
 
-[Your chosen license]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Related Work
 
@@ -497,5 +546,7 @@ If you use this in your research, please cite:
 - Initial release
 - Hard and soft training modes
 - Comprehensive prediction API (mean, quantiles, intervals, CDF/PDF, sampling)
+- Negative log-likelihood evaluation metric
+- Scikit-learn compatible scoring function
 - Categorical feature support
 - Multiple negative sampling strategies

@@ -46,6 +46,10 @@ print("=" * 60)
 y_pred = model.predict(X_test)
 print(f"\nMSE: {mean_squared_error(y_test, y_pred):.4f}")
 
+# Negative Log-Likelihood - evaluates probabilistic prediction quality
+nll, nll_per_sample = model.negative_log_likelihood(X_test, y_test)
+print(f"NLL: {nll:.4f}")
+
 # Prediction intervals
 lower, upper = model.predict_interval(X_test, alpha=0.1)
 coverage = np.mean((y_test >= lower) & (y_test <= upper))
