@@ -122,3 +122,4 @@ archive/
 # Examples (optional - uncomment if you don't want to track)
 # examples/
 
+.pypirc
