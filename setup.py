@@ -5,13 +5,13 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="distribution-regressor",
-    version="0.1.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    version="1.0.0",
+    author="Gabor Gulyas",
+    author_email="",
     description="Nonparametric distributional regression using LightGBM",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/distribution-regressor",
+    url="https://github.com/guyko81/DistributionRegressor",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",

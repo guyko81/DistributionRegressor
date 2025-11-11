@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "distribution-regressor"
-version = "0.1.0"
+version = "1.0.0"
 description = "Nonparametric distributional regression using LightGBM"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Gabor Gulyas"}
 ]
 keywords = ["machine-learning", "regression", "distribution", "lightgbm", "uncertainty"]
 classifiers = [
@@ -43,8 +43,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/distribution-regressor"
-Documentation = "https://github.com/yourusername/distribution-regressor#readme"
-Repository = "https://github.com/yourusername/distribution-regressor"
-"Bug Tracker" = "https://github.com/yourusername/distribution-regressor/issues"
+Homepage = "https://github.com/guyko81/DistributionRegressor"
+Documentation = "https://github.com/guyko81/DistributionRegressor#readme"
+Repository = "https://github.com/guyko81/DistributionRegressor"
+"Bug Tracker" = "https://github.com/guyko81/DistributionRegressor/issues"
 
