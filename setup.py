@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="distribution-regressor",
-    version="1.0.1",
+    version="1.1.0",
     author="Gabor Gulyas",
     author_email="",
     description="Nonparametric distributional regression using LightGBM",
@@ -14,7 +14,7 @@ setup(
     url="https://github.com/guyko81/DistributionRegressor",
     packages=find_packages(),
     classifiers=[
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",
         "Intended Audience :: Developers",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -25,13 +25,15 @@ setup(
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
     ],
     python_requires=">=3.8",
     install_requires=[
         "numpy>=1.20.0",
-        "scipy>=1.7.0",
+        "pandas>=1.3.0",
         "scikit-learn>=1.0.0",
         "lightgbm>=3.0.0",
+        "joblib>=1.0.0",
     ],
     extras_require={
         "dev": [

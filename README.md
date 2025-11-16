@@ -4,7 +4,7 @@ Nonparametric distributional regression using LightGBM. Predicts full probabilit
 
 ## Overview
 
-`DistributionRegressor` learns to predict complete probability distributions over continuous targets using contrastive learning. Unlike traditional regression that outputs a single value, this method provides:
+`DistributionRegressor` provides multiple methods to predict complete probability distributions over continuous targets. Unlike traditional regression that outputs a single value, this package provides:
 
 - Full probability distributions p(y|x)
 - Quantiles and prediction intervals
@@ -13,14 +13,28 @@ Nonparametric distributional regression using LightGBM. Predicts full probabilit
 
 **No parametric assumptions** - the distribution shape is learned from data.
 
+## Recommended: DistributionRegressorRandomForest
+
+The **Random Forest Single-Model approach** (`DistributionRegressorRandomForest`) is the **recommended method** for most use cases:
+
+### Why This Method?
+
+- ⚡ **Significantly Faster Training**: Trains only K models instead of K×N models (where K=estimators, N=bins)
+- 🎯 **Optimized Architecture**: Uses bin_id as a feature to train one classifier per estimator
+- 🌲 **Ensemble Power**: Combines multiple random binning strategies like Random Forest
+- 📊 **Full Distributions**: Predicts complete probability distributions, not just point estimates
+- 🔧 **Simple & Robust**: Fewer hyperparameters to tune, stable performance
+- 🎨 **Flexible**: Works with any number of bins, automatically adapts to data range
+
 ### Key Features
 
 - 📊 **Full Distribution Estimation**: Complete probability distributions, not just point predictions
-- 🎯 **Multiple Prediction Types**: Mean, median, mode, quantiles, intervals, CDF/PDF, sampling
-- 🔄 **Two Training Modes**: Hard labels (0/1) or soft labels (distance-weighted)
+- 🎯 **Multiple Prediction Types**: Mean, median, mode, quantiles, intervals, standard deviation
 - 🌲 **LightGBM Backend**: Fast, efficient gradient boosting with categorical feature support
-- 🎨 **Flexible Negative Sampling**: Multiple strategies (uniform, normal, stratified, mix)
+- ⚡ **Optimized Training**: Single-model-per-estimator design for speed
+- 🔄 **Random Binning**: Each estimator uses random bin boundaries for robust ensemble
 - 📈 **Uncertainty Quantification**: Natural uncertainty estimates from learned distributions
+- 🔀 **Parallel Processing**: Built-in parallelization support with n_jobs parameter
 
 ## Installation
 
@@ -28,190 +42,191 @@ Nonparametric distributional regression using LightGBM. Predicts full probabilit
 pip install distribution-regressor
 ```
 
-This will automatically install all dependencies (numpy, scipy, scikit-learn, lightgbm).
+This will automatically install all dependencies (numpy, pandas, scikit-learn, lightgbm, joblib).
 
 ## Quick Start
 
 ```python
 import numpy as np
-from distribution_regressor import DistributionRegressor
+from distribution_regressor import DistributionRegressorRandomForest
 
 # Your data
 X_train, y_train = ...  
 X_test, y_test = ...    
 
-# Create and train
-model = DistributionRegressor(
-    negative_type="soft",
-    n_estimators=200,
-    learning_rate=0.1,
-    k_neg=100,
+# Create and train (recommended method)
+model = DistributionRegressorRandomForest(
+    n_estimators=100,      # Number of trees in forest
+    n_bins=10,             # Bins per tree
+    n_jobs=-1,             # Use all CPUs
     random_state=42
 )
 
-model.fit(X_train, y_train, X_test, y_test)
+model.fit(X_train, y_train)
 
 # Predictions
-y_pred = model.predict(X_test)                      # Point predictions
-lower, upper = model.predict_interval(X_test, 0.1)  # 90% interval [5%, 95%]
-quantiles = model.predict_quantiles(X_test)         # Quantiles
-samples = model.sample_y(X_test, n_samples=1000)   # Draw samples
+y_pred = model.predict(X_test)                       # Mean predictions
+y_median = model.predict_median(X_test)              # Median predictions
+y_std = model.predict_std(X_test)                    # Standard deviation
+intervals = model.predict_interval(X_test, 0.95)     # 95% prediction intervals
+quantiles = model.predict_quantile(X_test, [0.1, 0.5, 0.9])  # Multiple quantiles
+
+# Full distribution
+y_values, distributions = model.predict_distribution(X_test, resolution=100)
 ```
 
 ## How It Works
 
-`DistributionRegressor` uses **contrastive learning** to learn a scoring function s(x, y):
+### DistributionRegressorRandomForest (Recommended)
 
-1. **Positive Pairs**: True training examples (x_i, y_i)
-2. **Negative Pairs**: Synthetic pairs (x_i, y_neg) where y_neg ≠ y_i  
-3. **Learn to Score**: Train model to give high scores to positives, low to negatives
-4. **Convert to Distribution**: p(y|x) ∝ exp(s(x,y)) via softmax
+Uses a **Random Forest philosophy with random binning** to build distribution ensembles:
 
-### Training Modes
+1. **Random Binning**: Each estimator generates random bin boundaries over the target range
+2. **Single Binary Classifier**: For each estimator, train ONE binary classifier with bin_id as a feature
+   - Input: (X, bin_id) → Output: probability that y falls in that bin
+   - This reduces model count from K×N to K (K=estimators, N=bins)
+3. **Ensemble Predictions**: Average predictions across all estimators for robust distributions
 
-| Aspect | Hard Negatives | Soft Negatives |
-|--------|---------------|----------------|
-| Internal Training | Binary labels (0/1) | Continuous labels (distance-weighted) |
-| LGBM Model | LGBMClassifier | LGBMRegressor |
-| Labels | True=1, all negatives=0 | True=1, negatives decay with distance |
-| Scaling | Min-Max | StandardScaler (X), z-score (y) |
-| Best For | Sharp, peaked distributions | Smooth, spread-out distributions |
-| Training Signal | All negatives equal | Negatives weighted by distance |
+**Key Innovation**: Instead of training N separate classifiers per estimator (one per bin), we train a single classifier that takes bin_id as an input feature. This dramatically speeds up training while maintaining prediction quality.
 
-**Soft negatives** compute labels based on distance:
-```python
-z = (y_neg - y_true) / soft_label_std
-plausibility = 2 * min(CDF(z), 1 - CDF(z))
-target = logit(plausibility)
-```
+### Architecture Comparison
+
+| Approach | Models Trained | Speed | Memory |
+|----------|---------------|-------|--------|
+| Naive (N classifiers/estimator) | K×N | Slow | High |
+| **Single-Model (this package)** | **K** | **Fast** | **Low** |
+
+For K=100 estimators and N=10 bins: **1000 models → 100 models** (10× fewer!)
 
 ## Model Parameters
 
+### DistributionRegressorRandomForest (Recommended)
+
 ```python
-DistributionRegressor(
-    # Training mode
-    negative_type="hard",           # "hard" or "soft"
+DistributionRegressorRandomForest(
+    # Ensemble configuration
+    n_estimators=100,               # Number of trees/estimators in forest
+    n_bins=10,                      # Number of bins per tree
     
-    # LightGBM parameters
-    n_estimators=500,
-    learning_rate=0.05,
-    max_depth=4,
-    min_samples_leaf=20,
-    subsample=0.8,
-    colsample=0.8,
-    lgbm_params=None,               # Additional LGBM params
+    # Parallelization
+    n_jobs=None,                    # Parallel jobs (-1 = all CPUs, None = 1)
     
-    # Negative sampling
-    k_neg=100,                      # Negatives per positive sample
-    neg_sampler="mix",              # "uniform", "normal", "mix", "stratified"
-    neg_std=2.0,                    # Std for normal sampling (scaled space)
-    soft_label_std=1.0,             # Std for soft labels (soft mode only)
-    uniform_margin=0.25,            # Margin for uniform sampling
-    stratified_global_frac=0.5,     # Global/local mix for stratified
+    # LightGBM parameters (per classifier)
+    lgbm_params={
+        'learning_rate': 0.1,       # Boosting learning rate
+        'max_depth': 7,             # Maximum tree depth
+        'n_estimators': 100,        # Boosting rounds per classifier
+        'subsample': 0.8,           # Row sampling fraction
+        'colsample_bytree': 0.8,    # Feature sampling fraction
+        'reg_alpha': 0.0,           # L1 regularization
+        'reg_lambda': 0.0,          # L2 regularization
+        'max_bin': 255,             # Max number of bins for features
+    },
     
-    # Features
-    use_interactions=True,          # Add interaction features
-    categorical_features=None,      # List of categorical column indices
-    
-    # Training
-    early_stopping_rounds=50,
-    verbose=1,
-    random_state=42
+    # Random state
+    random_state=42                 # Seed for reproducibility
 )
 ```
+
+**Simple defaults work well!** Just set `n_estimators`, `n_bins`, and `n_jobs` for most cases.
 
 ## API Reference
 
 ### Training
 
 ```python
-model.fit(X, y, X_val=None, y_val=None)
+model.fit(X, y)
 ```
 
 **Args:**
-- `X`: (n, d) training features
-- `y`: (n,) training targets  
-- `X_val`, `y_val`: Optional validation data for early stopping
+- `X`: (n_samples, n_features) training features (numpy array or pandas DataFrame)
+- `y`: (n_samples,) training targets
+
+The model is scikit-learn compatible and works with numpy arrays or pandas DataFrames.
 
 ### Predictions
 
 #### 1. Point Predictions
 
 ```python
-y_pred = model.predict(X, method="mean", y_grid=None)
+# Mean (expected value)
+y_pred = model.predict(X, resolution=100)
+y_mean = model.predict_mean(X, resolution=100)  # Explicit
+
+# Median
+y_median = model.predict_median(X, resolution=100)
+
+# Mode (peak of distribution)
+y_mode = model.predict_mode(X, resolution=100)
 ```
 
 **Args:**
-- `method`: "mean" (expected value), "median", or "mode"
-- `y_grid`: Optional grid (auto-generated if None)
-
-**Examples:**
-```python
-y_mean = model.predict(X_test)  # Default: mean
-y_median = model.predict(X_test, method="median")
-y_mode = model.predict(X_test, method="mode")
-```
+- `X`: (n_samples, n_features) input features
+- `resolution`: Number of points in y-grid for computing distributions (default=100)
 
 #### 2. Quantiles
 
 ```python
-quantiles = model.predict_quantiles(X, qs=[0.05, 0.5, 0.95], y_grid=None)
+quantiles = model.predict_quantile(X, q=0.5, resolution=100)
 ```
 
-**Returns:** (n, len(qs)) array
+**Args:**
+- `q`: float or array of floats in [0, 1]
+- Returns shape (n_samples,) if q is scalar, (n_samples, len(q)) if q is array
 
 **Examples:**
 ```python
-# 5th, 50th, 95th percentiles
-q = model.predict_quantiles(X_test, qs=[0.05, 0.5, 0.95])
+# Median
+median = model.predict_quantile(X_test, q=0.5)
+
+# Multiple quantiles
+q = model.predict_quantile(X_test, q=[0.1, 0.5, 0.9])
 
 # Deciles
-q = model.predict_quantiles(X_test, qs=np.arange(0.1, 1.0, 0.1))
+q = model.predict_quantile(X_test, q=np.arange(0.1, 1.0, 0.1))
 ```
 
 #### 3. Prediction Intervals
 
 ```python
-lower, upper = model.predict_interval(X, alpha=0.1, y_grid=None)
+intervals = model.predict_interval(X, confidence=0.95, resolution=100)
 ```
 
 **Args:**
-- `alpha`: Significance level (0.1 = 90% interval)
+- `confidence`: Confidence level (0.95 = 95% interval from 2.5% to 97.5% quantiles)
+
+**Returns:** (n_samples, 2) array of [lower, upper] bounds
 
 **Examples:**
 ```python
-# 90% prediction interval (5th to 95th percentile)
-lower, upper = model.predict_interval(X_test, alpha=0.1)
-
-# 95% prediction interval (2.5th to 97.5th percentile)
-lower, upper = model.predict_interval(X_test, alpha=0.05)
+# 95% prediction interval
+intervals = model.predict_interval(X_test, confidence=0.95)
+lower, upper = intervals[:, 0], intervals[:, 1]
 
 # Check coverage
-lower, upper = model.predict_interval(X_test, alpha=0.1)
 coverage = np.mean((y_test >= lower) & (y_test <= upper))
-print(f"90% interval coverage: {coverage:.1%}")
+print(f"Coverage: {coverage:.1%}")
+
+# 90% interval
+intervals = model.predict_interval(X_test, confidence=0.90)
 ```
 
-#### 4. Distribution Functions
+#### 4. Full Distribution
 
-**Predict full CDF:**
 ```python
-cdf, y_grid = model.predict_cdf(X, y_grid=None)
-# Returns: (n, n_grid) array of cumulative probabilities
+y_values, distributions = model.predict_distribution(X, resolution=100)
 ```
 
-**Predict full PDF:**
-```python
-pdf, y_grid = model.predict_pdf(X, y_grid=None)
-# Returns: (n, n_grid) array of probability densities
-```
+**Returns:**
+- `y_values`: (resolution,) array of y-grid points
+- `distributions`: (n_samples, resolution) array of probability densities
 
 **Example:**
 ```python
-pdf, y_grid = model.predict_pdf(X_test[:1])
+y_values, distributions = model.predict_distribution(X_test[:1], resolution=200)
 
 import matplotlib.pyplot as plt
-plt.plot(y_grid, pdf[0])
+plt.plot(y_values, distributions[0])
 plt.axvline(y_test[0], color='r', linestyle='--', label='True')
 plt.xlabel('y')
 plt.ylabel('Probability Density')
@@ -219,73 +234,13 @@ plt.legend()
 plt.show()
 ```
 
-#### 5. Sampling
+#### 5. Standard Deviation
 
 ```python
-samples = model.sample_y(X, n_samples=1000, y_grid=None, random_state=None)
+stds = model.predict_std(X, resolution=100)
 ```
 
-**Returns:** (n, n_samples) array
-
-**Examples:**
-```python
-# Draw 1000 samples per test point
-samples = model.sample_y(X_test, n_samples=1000, random_state=42)
-
-# Compute statistics
-sample_means = samples.mean(axis=1)
-sample_stds = samples.std(axis=1)
-sample_q95 = np.percentile(samples, 95, axis=1)
-```
-
-### Evaluation
-
-#### Negative Log-Likelihood
-
-```python
-nll, nll_per_sample = model.negative_log_likelihood(X, y_true, y_grid=None, bandwidth=None)
-```
-
-Evaluates the quality of predicted probability distributions by measuring how well they assign probability mass to the true target values. This is the standard evaluation metric for probabilistic regression models.
-
-**Args:**
-- `X`: (n, d) feature array
-- `y_true`: (n,) true target values
-- `y_grid`: Optional grid of y-values (auto-generated if None)
-- `bandwidth`: Optional kernel bandwidth for probability smoothing
-
-**Returns:**
-- `nll`: Mean negative log-likelihood across all samples
-- `nll_per_sample`: (n,) array of per-sample NLL values
-
-Lower values indicate better probabilistic predictions.
-
-**Examples:**
-```python
-# Evaluate on test set
-nll, nll_per_sample = model.negative_log_likelihood(X_test, y_test)
-
-# With bandwidth smoothing for improved robustness
-nll_smooth, _ = model.negative_log_likelihood(X_test, y_test, bandwidth=0.1)
-
-# Analyze per-sample performance
-worst_predictions = np.argsort(nll_per_sample)[-10:]
-```
-
-#### Model Scoring
-
-```python
-score = model.score(X, y_true, y_grid=None, bandwidth=None)
-```
-
-Returns the negative of negative log-likelihood for scikit-learn compatibility. Higher values indicate better model performance. This enables integration with scikit-learn's model selection utilities.
-
-**Example:**
-```python
-from sklearn.model_selection import cross_val_score
-
-scores = cross_val_score(model, X, y, cv=5, scoring=None)
-```
+Returns the standard deviation of the predicted distribution for each sample.
 
 ## Complete Example
 
@@ -293,8 +248,8 @@ scores = cross_val_score(model, X, y, cv=5, scoring=None)
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, mean_absolute_error
-from distribution_regressor import DistributionRegressor
+from sklearn.metrics import mean_squared_error
+from distribution_regressor import DistributionRegressorRandomForest
 
 # Generate data with heteroscedastic noise
 np.random.seed(42)
@@ -309,39 +264,40 @@ X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-# Train with soft negatives
-model = DistributionRegressor(
-    negative_type="soft",
-    n_estimators=200,
-    learning_rate=0.1,
-    k_neg=100,
-    soft_label_std=1.0,
-    neg_sampler="stratified",
-    early_stopping_rounds=30,
-    verbose=1,
+# Train Random Forest Distribution Regressor
+model = DistributionRegressorRandomForest(
+    n_estimators=100,
+    n_bins=10,
+    n_jobs=-1,              # Use all CPUs
     random_state=42
 )
 
-model.fit(X_train, y_train, X_test, y_test)
+model.fit(X_train, y_train)
 
 # Point predictions
 y_pred = model.predict(X_test)
 print(f"MSE: {mean_squared_error(y_test, y_pred):.4f}")
 
-# Prediction intervals (90% = 5th to 95th percentile)
-lower, upper = model.predict_interval(X_test, alpha=0.1)
+# Prediction intervals
+intervals = model.predict_interval(X_test, confidence=0.90)
+lower, upper = intervals[:, 0], intervals[:, 1]
 coverage = np.mean((y_test >= lower) & (y_test <= upper))
 print(f"90% interval coverage: {coverage:.1%}")
 
 # Quantiles
-q = model.predict_quantiles(X_test, qs=[0.1, 0.5, 0.9])
+q = model.predict_quantile(X_test, q=[0.1, 0.5, 0.9])
+print(f"10th, 50th, 90th quantiles shape: {q.shape}")
+
+# Standard deviations
+stds = model.predict_std(X_test)
+print(f"Mean predicted std: {stds.mean():.3f}")
 
 # Visualize distribution for one example
 idx = 0
-pdf, y_grid = model.predict_pdf(X_test[idx:idx+1])
+y_values, distributions = model.predict_distribution(X_test[idx:idx+1], resolution=200)
 
 plt.figure(figsize=(10, 6))
-plt.plot(y_grid, pdf[0], 'b-', lw=2, label='Predicted PDF')
+plt.plot(y_values, distributions[0], 'b-', lw=2, label='Predicted Distribution')
 plt.axvline(y_test[idx], color='r', linestyle='--', lw=2, 
             label=f'True: {y_test[idx]:.2f}')
 plt.axvline(y_pred[idx], color='g', linestyle='--', lw=2,
@@ -354,170 +310,137 @@ plt.title('Predicted Distribution')
 plt.legend()
 plt.grid(True, alpha=0.3)
 plt.show()
-
-# Sample from distribution
-samples = model.sample_y(X_test[:5], n_samples=5000, random_state=42)
-for i in range(5):
-    print(f"Sample {i}: mean={samples[i].mean():.3f}, "
-          f"std={samples[i].std():.3f}, true={y_test[i]:.3f}")
 ```
 
 ## Advanced Usage
 
-### Categorical Features
-
-```python
-# Specify categorical columns by index
-model = DistributionRegressor(
-    categorical_features=[0, 3, 5],  # Columns 0, 3, 5 are categorical
-    negative_type="soft"
-)
-
-# No one-hot encoding needed - LightGBM handles them natively
-model.fit(X_train, y_train)
-```
-
-### Negative Sampling Strategies
-
-```python
-# 1. Normal: Local sampling around true values
-model = DistributionRegressor(
-    neg_sampler="normal",
-    neg_std=2.0  # Controls spread
-)
-
-# 2. Uniform: Global sampling across full range
-model = DistributionRegressor(
-    neg_sampler="uniform",
-    uniform_margin=0.25  # Extra margin
-)
-
-# 3. Stratified: Mix of local + global (recommended)
-model = DistributionRegressor(
-    neg_sampler="stratified",
-    stratified_global_frac=0.5,  # 50% global, 50% local
-    neg_std=2.0,
-    uniform_margin=0.25
-)
-
-# 4. Mix: Half normal, half uniform
-model = DistributionRegressor(
-    neg_sampler="mix"
-)
-```
-
 ### Custom LightGBM Parameters
 
 ```python
-model = DistributionRegressor(
-    negative_type="soft",
+model = DistributionRegressorRandomForest(
+    n_estimators=100,
+    n_bins=10,
     lgbm_params={
+        'learning_rate': 0.05,      # Slower learning
+        'max_depth': 5,             # Shallower trees
         'reg_alpha': 0.1,           # L1 regularization
         'reg_lambda': 0.1,          # L2 regularization
-        'min_gain_to_split': 0.01,
-        'num_leaves': 31
-    }
+        'num_leaves': 31,
+        'min_child_samples': 5
+    },
+    n_jobs=-1,
+    random_state=42
 )
 ```
 
-### Custom Grid
+### Higher Resolution Distributions
 
 ```python
-# Define your own evaluation grid
-y_grid = np.linspace(y_min, y_max, 2000)
+# Use more points for smoother distributions
+y_values, distributions = model.predict_distribution(X_test, resolution=500)
 
-# Use for all predictions
-y_pred = model.predict(X_test, y_grid=y_grid)
-quantiles = model.predict_quantiles(X_test, y_grid=y_grid)
-samples = model.sample_y(X_test, y_grid=y_grid)
+# All prediction methods accept resolution parameter
+y_pred = model.predict(X_test, resolution=200)
+quantiles = model.predict_quantile(X_test, q=[0.1, 0.9], resolution=200)
+```
+
+### Working with DataFrames
+
+```python
+import pandas as pd
+
+# Works seamlessly with pandas
+df_train = pd.DataFrame(X_train, columns=['feat1', 'feat2', 'feat3', 'feat4', 'feat5'])
+df_test = pd.DataFrame(X_test, columns=['feat1', 'feat2', 'feat3', 'feat4', 'feat5'])
+
+model = DistributionRegressorRandomForest(n_estimators=100, random_state=42)
+model.fit(df_train, y_train)
+y_pred = model.predict(df_test)
 ```
 
 ## Comparison with Other Methods
 
-| Method | Distributions | Uncertainty | Parametric | Speed |
-|--------|--------------|-------------|------------|-------|
-| Linear Regression | ✗ | ✗ | Gaussian | ⚡⚡⚡ |
-| Random Forest | ✗ | Limited | ✗ | ⚡⚡ |
-| Gradient Boosting | ✗ | ✗ | ✗ | ⚡⚡⚡ |
-| Quantile Regression | Limited | ✓ | ✗ | ⚡⚡ |
-| NGBoost | ✓ | ✓ | ✓ (Gaussian) | ⚡⚡ |
-| **DistributionRegressor** | **✓** | **✓** | **✗ (Non-parametric)** | **⚡⚡** |
+| Method | Distributions | Uncertainty | Parametric | Speed | Complexity |
+|--------|--------------|-------------|------------|-------|------------|
+| Linear Regression | ✗ | ✗ | Gaussian | ⚡⚡⚡ | Low |
+| Random Forest | ✗ | Limited | ✗ | ⚡⚡ | Low |
+| Gradient Boosting | ✗ | ✗ | ✗ | ⚡⚡⚡ | Low |
+| Quantile Regression | Limited | ✓ | ✗ | ⚡⚡ | Medium |
+| NGBoost | ✓ | ✓ | ✓ (Gaussian) | ⚡⚡ | Medium |
+| **DistributionRegressorRandomForest** | **✓** | **✓** | **✗ (Non-parametric)** | **⚡⚡** | **Low** |
 
 ### Advantages
 
 ✅ **No distributional assumptions** - learns any distribution shape  
 ✅ **Flexible uncertainty** - captures heteroscedastic noise naturally  
-✅ **One model, many predictions** - mean, quantiles, intervals, samples all from one model  
-✅ **Efficient** - leverages fast LightGBM  
-✅ **Categorical support** - native handling without encoding  
+✅ **One model, many predictions** - mean, median, mode, quantiles, intervals, std dev from one model  
+✅ **Fast training** - optimized single-model-per-estimator design  
+✅ **Simple** - few hyperparameters, sensible defaults  
+✅ **Parallel** - built-in multi-core support with n_jobs  
+✅ **Robust ensemble** - random binning like Random Forest  
 
 ### Limitations
 
-⚠️ **Grid-based** - requires evaluating on a grid (slower for many predictions)  
-⚠️ **Memory** - storing distributions can be memory-intensive  
-⚠️ **Tuning** - requires careful selection of negative sampling strategy  
+⚠️ **Grid-based** - evaluates distributions on a grid (adjustable resolution)  
+⚠️ **Memory** - more memory than single-point regressors (but less than naive approaches)  
 
 ## Best Practices
 
-### 1. Choose Training Mode
+### 1. Number of Estimators
 
-**Soft negatives** (recommended):
-- Smooth, continuous distributions
-- Better training signal
-- Slightly slower
+- **n_estimators=100**: Good default for most cases
+- **n_estimators=50**: Faster training, still reasonable
+- **n_estimators=200+**: Better distributions, slower training
 
-**Hard negatives**:
-- Sharp, concentrated distributions  
-- Faster training
-- Simpler objective
+### 2. Number of Bins
 
-### 2. Tune Negative Sampling
+- **n_bins=10**: Good default, balances resolution and speed
+- **n_bins=5-7**: Faster, coarser distributions
+- **n_bins=15-20**: Finer distributions, slower training
 
-- **k_neg**: 100-200 for better distributions, 50-100 for speed
-- **neg_std**: Smaller (1.0-2.0) for local, larger (3.0+) for global
-- **neg_sampler**: "stratified" usually works best
-
-### 3. Grid Resolution
-
-- Default 1000 points usually sufficient
-- Increase for highly peaked distributions
-- Decrease for faster inference
-
-### 4. Always Use Validation
+### 3. Parallelization
 
 ```python
-model.fit(X_train, y_train, X_val, y_val)  # For early stopping
+# Use all CPUs for significant speedup
+model = DistributionRegressorRandomForest(n_jobs=-1)
 ```
+
+### 4. Resolution
+
+- **resolution=100**: Good default for most predictions
+- **resolution=200-500**: Smoother distributions for visualization
+- **resolution=50**: Faster inference when precision isn't critical
 
 ## Troubleshooting
 
 ### Poor Calibration (intervals don't match nominal coverage)
 
 **Solution:**
-- Increase `k_neg` (more negatives)
-- Try different `neg_sampler` strategies
-- Adjust `soft_label_std` (for soft mode)
+- Increase `n_estimators` (more trees)
+- Adjust `n_bins` (try 15-20 for finer resolution)
+- Tune LGBM regularization
 
 ### Slow Training
 
 **Solution:**
-- Reduce `k_neg`
-- Fewer `n_estimators`
-- Lower `subsample` and `colsample`
+- Reduce `n_estimators` (try 50)
+- Reduce `n_bins` (try 5-7)
+- Use `n_jobs=-1` for parallelization
+- Lower LGBM `n_estimators` in `lgbm_params`
 
-### Overconfident Predictions
+### Slow Predictions
 
 **Solution:**
-- Increase `soft_label_std` (soft mode)
-- Use "stratified" or "uniform" sampling
-- Add regularization: `lgbm_params={'reg_alpha': 0.1, 'reg_lambda': 0.1}`
+- Reduce `resolution` parameter (try 50)
+- Reduce `n_estimators` (fewer trees)
+- Use `n_jobs=-1` for parallel predictions
 
 ### Memory Issues
 
 **Solution:**
-- Reduce grid size in predictions
-- Process in batches
-- Use smaller `k_neg` during training
+- Reduce `resolution` in predictions
+- Process test set in smaller batches
+- Reduce `n_estimators`
 
 ## Citation
 
@@ -542,13 +465,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [LightGBM](https://github.com/microsoft/LightGBM) - Efficient gradient boosting framework
 - [Conformalized Quantile Regression](https://github.com/yromano/cqr) - Distribution-free prediction intervals
 
+## Alternative Methods
+
+The package also includes the original contrastive learning approach (`DistributionRegressor`) with hard/soft negative sampling. See the source code for details. However, **DistributionRegressorRandomForest is recommended** for most use cases due to its simplicity, speed, and robust performance.
+
 ## Changelog
 
+### Version 1.1.0 (2025)
+- **NEW**: `DistributionRegressorRandomForest` - optimized random forest approach (recommended)
+- Single-model-per-estimator design for 10× faster training
+- Built-in parallelization with n_jobs parameter
+- Simplified API and hyperparameters
+
 ### Version 1.0.0 (2025)
-- Initial release
-- Hard and soft training modes
-- Comprehensive prediction API (mean, quantiles, intervals, CDF/PDF, sampling)
-- Negative log-likelihood evaluation metric
-- Scikit-learn compatible scoring function
-- Categorical feature support
-- Multiple negative sampling strategies
+- Initial release with `DistributionRegressor`
+- Contrastive learning with hard/soft negative modes
+- Comprehensive prediction API
+- Scikit-learn compatibility
