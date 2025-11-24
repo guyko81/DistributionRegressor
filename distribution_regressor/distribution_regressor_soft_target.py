@@ -124,7 +124,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         y_max = float(np.max(y_array))
         
         # Add a small buffer to the grid range
-        margin = (y_max - y_min) * 0.1
+        # margin = (y_max - y_min) * 0.1
+        margin = 0
         self.grid_ = np.linspace(y_min - margin, y_max + margin, self.n_bins)
         
         # 3. Resolve Sigma
@@ -143,7 +144,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             y_pred = baseline_model.predict(X_array)
             
             residuals = y_array - y_pred
-            std_resid = np.std(residuals)
+            std_resid = np.std(residuals)*2
             
             # Calculate grid step size
             grid_step = (self.grid_[-1] - self.grid_[0]) / (self.n_bins - 1)
