@@ -61,7 +61,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
     def __init__(
         self,
         n_bins=50,
-        sigma=1.0,
+        sigma='auto',
         output_smoothing=1.0,
         n_estimators=100,
         learning_rate=0.1,
