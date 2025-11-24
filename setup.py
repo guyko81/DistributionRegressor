@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="distribution-regressor",
-    version="1.1.0",
+    version="1.2.0",
     author="Gabor Gulyas",
     author_email="",
     description="Nonparametric distributional regression using LightGBM",
@@ -34,6 +34,7 @@ setup(
         "scikit-learn>=1.0.0",
         "lightgbm>=3.0.0",
         "joblib>=1.0.0",
+        "scipy>=1.7.0",
     ],
     extras_require={
         "dev": [
@@ -44,4 +45,3 @@ setup(
         ],
     },
 )
-

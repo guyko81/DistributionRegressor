@@ -20,23 +20,20 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 print("=" * 60)
-print("Training DistributionRegressor")
+print("Training DistributionRegressor (Soft Target)")
 print("=" * 60)
 
 # Create and train model
 model = DistributionRegressor(
-    negative_type="soft",
-    n_estimators=200,
+    n_bins=50,              # Resolution of the distribution
+    n_estimators=200,       # Number of trees
     learning_rate=0.1,
-    k_neg=100,
-    soft_label_std=1.0,
-    neg_sampler="stratified",
-    early_stopping_rounds=30,
-    verbose=1,
+    sigma='auto',           # Automatic noise estimation
+    output_smoothing=1.0,   # Smooth the output distribution
     random_state=42
 )
 
-model.fit(X_train, y_train, X_test, y_test)
+model.fit(X_train, y_train)
 
 print("\n" + "=" * 60)
 print("Making Predictions")
@@ -46,28 +43,27 @@ print("=" * 60)
 y_pred = model.predict(X_test)
 print(f"\nMSE: {mean_squared_error(y_test, y_pred):.4f}")
 
-# Negative Log-Likelihood - evaluates probabilistic prediction quality
-nll, nll_per_sample = model.negative_log_likelihood(X_test, y_test)
-print(f"NLL: {nll:.4f}")
-
 # Prediction intervals
-lower, upper = model.predict_interval(X_test, alpha=0.1)
+intervals = model.predict_interval(X_test, confidence=0.90)
+lower, upper = intervals[:, 0], intervals[:, 1]
 coverage = np.mean((y_test >= lower) & (y_test <= upper))
 print(f"90% interval coverage: {coverage:.1%}")
 
 # Quantiles
-quantiles = model.predict_quantiles(X_test, qs=[0.1, 0.5, 0.9])
+quantiles = model.predict_quantile(X_test, q=[0.1, 0.5, 0.9])
 print(f"\nQuantiles shape: {quantiles.shape}")
 print(f"First 5 medians: {quantiles[:5, 1]}")
 
-# Samples
-samples = model.sample_y(X_test[:5], n_samples=1000, random_state=42)
-print(f"\nSample statistics (first 5 test points):")
-for i in range(5):
-    print(f"  Point {i}: mean={samples[i].mean():.3f}, "
-          f"std={samples[i].std():.3f}, true={y_test[i]:.3f}")
+# Standard Deviation (Uncertainty)
+stds = model.predict_std(X_test)
+print(f"\nMean Predicted Std Dev: {stds.mean():.3f}")
+
+# Full Distribution
+print(f"\nPredicting full distribution for first sample...")
+grid, dists = model.predict_distribution(X_test[:1])
+print(f"Grid shape: {grid.shape}")
+print(f"Distribution shape: {dists.shape}")
 
 print("\n" + "=" * 60)
 print("Done!")
 print("=" * 60)
-

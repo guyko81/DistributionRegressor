@@ -81,108 +81,6 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
     def _validate_params(self):
         if self.n_bins < 2:
             raise ValueError("n_bins must be >= 2")
-            
-    def _generate_soft_targets(self, y_true_expanded, grid_values_expanded):
-        """
-        Generates probability scores (0 to 1) based on distance between 
-        the true y and the specific grid point for that row.
-        """
-        # Calculate squared distance
-        diff_sq = (y_true_expanded - grid_values_expanded) ** 2
-        
-        # Calculate Gaussian weights: exp(-dist^2 / (2*sigma^2))
-        # This makes the target 1.0 at the exact true value, decaying to 0.0 further away
-        targets = np.exp(-diff_sq / (2 * self.sigma_val_ ** 2))
-        
-        # Threshold to actual 0 to help sparsity/optimization if it's super small
-        targets[targets < 1e-5] = 0.0
-        
-        return targets
-
-    def fit(self, X, y):
-        """
-        Fit the model by expanding the dataset and training on soft targets.
-        """
-        self._validate_params()
-        
-        # 1. Prepare Data
-        self._is_dataframe = isinstance(X, pd.DataFrame)
-        if self._is_dataframe:
-            self.feature_names_in_ = X.columns.tolist()
-            X_array = X.values
-            y_array = np.asarray(y)
-        else:
-            X_array = X
-            y_array = y
-            
-        X_array, y_array = check_X_y(X_array, y_array, accept_sparse=False, dtype=np.float64)
-        self.n_features_in_ = X_array.shape[1]
-        n_samples = X_array.shape[0]
-
-        # 2. Define the Grid (The "Canvas")
-        y_min = float(np.min(y_array))
-        y_max = float(np.max(y_array))
-        
-        # Add a small buffer to the grid range
-        # margin = (y_max - y_min) * 0.1
-        margin = 0
-        self.grid_ = np.linspace(y_min - margin, y_max + margin, self.n_bins)
-        
-        # 3. Resolve Sigma
-        if self.sigma == 'auto':
-            # Data-driven sigma: fit a baseline regressor to estimate inherent noise
-            baseline_params = {
-                'n_estimators': self.n_estimators,
-                'learning_rate': self.learning_rate,
-                'random_state': self.random_state,
-                'verbose': -1
-            }
-            baseline_params.update(self.lgbm_kwargs)
-            
-            baseline_model = LGBMRegressor(**baseline_params)
-            baseline_model.fit(X_array, y_array)
-            y_pred = baseline_model.predict(X_array)
-            
-            residuals = y_array - y_pred
-            std_resid = np.std(residuals)*2
-            
-            # Calculate grid step size
-            grid_step = (self.grid_[-1] - self.grid_[0]) / (self.n_bins - 1)
-            
-            # Use the max to ensure sigma covers at least one grid interval
-            self.sigma_val_ = max(std_resid, grid_step)
-        else:
-            self.sigma_val_ = float(self.sigma)
-
-    def _solve_sigma(self, y_true, probs, grid, current_sigma):
-        """
-        Updates sigma using the EM-like update derived from Natural Gradient / Maximum Likelihood.
-        sigma_new^2 = (1/N) * sum_i sum_j P(bin_j | y_i) * (y_i - g_j)^2
-        where P(bin_j | y_i) is the posterior probability of the bin given the prediction and observation.
-        """
-        # Precompute squared diffs: (n_samples, n_bins)
-        diff_sq = (y_true[:, None] - grid[None, :]) ** 2
-        
-        # Calculate Likelihoods P(y_i | bin_j) ~ Gaussian(y_i - g_j, sigma)
-        # We drop the normalization constant 1/(sigma*sqrt(2pi)) as it cancels out in the posterior weights
-        likelihoods = np.exp(-diff_sq / (2 * current_sigma ** 2))
-        
-        # Compute Unnormalized Posteriors: Prior(bin_j) * Likelihood(y_i | bin_j)
-        # Prior is the model's predicted probability 'probs'
-        posteriors_unnorm = probs * likelihoods
-        
-        # Normalize to get P(bin_j | y_i)
-        row_sums = posteriors_unnorm.sum(axis=1, keepdims=True)
-        row_sums[row_sums == 0] = 1.0 # Avoid division by zero
-        posteriors = posteriors_unnorm / row_sums
-        
-        # Expected Squared Error under the Posterior
-        # sum_j [ P(bin_j | y_i) * (y_i - g_j)^2 ]
-        expected_sq_err = np.sum(posteriors * diff_sq, axis=1)
-        
-        # Average over all samples to get sigma^2
-        new_sigma_sq = np.mean(expected_sq_err)
-        return np.sqrt(new_sigma_sq)
 
     def fit(self, X, y):
         """
@@ -428,23 +326,78 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         X : array-like of shape (n_samples, n_features)
             Samples.
         
-        q : float, default=0.5
-            Quantile to compute, in [0, 1].
+        q : float or array-like, default=0.5
+            Quantile(s) to compute, in [0, 1].
         
         Returns
         -------
-        quantiles : array of shape (n_samples,)
+        quantiles : array of shape (n_samples,) or (n_samples, n_quantiles)
             Predicted quantiles.
         """
         grid, dists = self.predict_distribution(X)
         # Cumulative sum
         cdfs = np.cumsum(dists, axis=1)
         
-        quantiles = np.zeros(len(X))
-        for i in range(len(X)):
+        # Handle scalar vs array q
+        q_arr = np.asarray(q)
+        is_scalar = q_arr.ndim == 0
+        if is_scalar:
+            q_arr = q_arr.reshape(1)
+            
+        n_samples = len(X)
+        n_quantiles = len(q_arr)
+        quantiles = np.zeros((n_samples, n_quantiles))
+        
+        for i in range(n_samples):
             # Find index where CDF >= q
-            idx = np.searchsorted(cdfs[i], q)
+            # searchsorted works with array q
+            indices = np.searchsorted(cdfs[i], q_arr)
             # Clip to bounds
-            idx = np.clip(idx, 0, self.n_bins - 1)
-            quantiles[i] = grid[idx]
+            indices = np.clip(indices, 0, self.n_bins - 1)
+            quantiles[i] = grid[indices]
+            
+        if is_scalar:
+            return quantiles.flatten()
         return quantiles
+
+    def predict_interval(self, X, confidence=0.95):
+        """
+        Predict prediction interval for each sample.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+        
+        confidence : float, default=0.95
+            Confidence level (e.g., 0.95 for 95% interval).
+            
+        Returns
+        -------
+        intervals : array of shape (n_samples, 2)
+            Lower and upper bounds of the interval.
+        """
+        alpha = 1.0 - confidence
+        q_low = alpha / 2.0
+        q_high = 1.0 - alpha / 2.0
+        
+        return self.predict_quantile(X, q=[q_low, q_high])
+
+    def predict_std(self, X):
+        """
+        Predict standard deviation of the distribution for each sample.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+            
+        Returns
+        -------
+        stds : array of shape (n_samples,)
+            Predicted standard deviations.
+        """
+        grid, dists = self.predict_distribution(X)
+        means = np.sum(dists * grid, axis=1, keepdims=True)
+        variance = np.sum(dists * (grid - means)**2, axis=1)
+        return np.sqrt(variance)
