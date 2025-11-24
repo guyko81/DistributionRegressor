@@ -34,7 +34,9 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
     sigma : float or str, default=1.0
         The standard deviation of the Gaussian kernel used to generate soft targets.
         - If float: Constant spread around the true y.
-        - If 'auto': Heuristically set to (y_max - y_min) / n_bins.
+        - If 'auto': Data-driven estimation based on residual standard deviation from
+          a preliminary LGBMRegressor fit. This reflects the inherent noise in the data.
+          Set to max(std(residuals), grid_step) to ensure at least one grid interval.
         Controls the "dragging" effect:
         - Small sigma: Target looks like a sharp spike (One-Hot).
         - Large sigma: Target looks like a wide bell curve.
@@ -127,37 +129,59 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         
         # 3. Resolve Sigma
         if self.sigma == 'auto':
-            self.sigma_val_ = (self.grid_[-1] - self.grid_[0]) / self.n_bins
+            # Data-driven sigma: fit a baseline regressor to estimate inherent noise
+            baseline_params = {
+                'n_estimators': self.n_estimators,
+                'learning_rate': self.learning_rate,
+                'random_state': self.random_state,
+                'verbose': -1
+            }
+            baseline_params.update(self.lgbm_kwargs)
+            
+            baseline_model = LGBMRegressor(**baseline_params)
+            baseline_model.fit(X_array, y_array)
+            y_pred = baseline_model.predict(X_array)
+            
+            residuals = y_array - y_pred
+            std_resid = np.std(residuals)
+            
+            # Calculate grid step size
+            grid_step = (self.grid_[-1] - self.grid_[0]) / (self.n_bins - 1)
+            
+            # Use the max to ensure sigma covers at least one grid interval
+            self.sigma_val_ = max(std_resid, grid_step)
         else:
             self.sigma_val_ = float(self.sigma)
 
-        # 4. Expand Dataset (The "Multiple Rows Trick")
-        # We repeat every sample N_BINS times
-        X_expanded = np.repeat(X_array, self.n_bins, axis=0)
+        # 4. Expand Dataset Efficiently (Pre-allocation + Broadcasting)
+        # We construct the expanded matrix directly to save memory.
+        # Shape: (n_samples * n_bins, n_features + 1)
+        # This avoids intermediate copies from np.repeat and pd.DataFrame
+        n_total_rows = n_samples * self.n_bins
+        X_final = np.empty((n_total_rows, self.n_features_in_ + 1), dtype=X_array.dtype)
         
-        # We tile the grid for every sample: [g1, g2, ..., gN, g1, g2, ...]
-        grid_tile = np.tile(self.grid_, n_samples)
+        # Fill feature columns using broadcasting
+        # View X_final's feature part as (n_samples, n_bins, n_features)
+        X_final[:, :-1].reshape(n_samples, self.n_bins, -1)[:] = X_array[:, None, :]
         
-        # We repeat the true y to align with expanded X: [y1, y1, ..., y1, y2, y2, ...]
-        y_repeated = np.repeat(y_array, self.n_bins)
+        # Fill grid_point column using broadcasting
+        X_final[:, -1].reshape(n_samples, self.n_bins)[:] = self.grid_
         
-        # 5. Generate Soft Targets
-        y_targets_soft = self._generate_soft_targets(y_repeated, grid_tile)
+        # 5. Generate Soft Targets Efficiently
+        # Broadcast y and grid to compute diffs: (n_samples, n_bins)
+        # Avoids creating huge 1D repeated arrays
+        diff_sq = (y_array[:, None] - self.grid_[None, :]) ** 2
+        targets = np.exp(-diff_sq / (2 * self.sigma_val_ ** 2))
+        targets[targets < 1e-5] = 0.0
+        y_targets_soft = targets.ravel()
         
-        # 6. Feature Engineering
-        # We add the 'grid_point' as a feature. 
-        # The model learns: f(X, grid_point) -> Probability Strength
+        # 6. Feature Names
         if self._is_dataframe:
             feature_names = self.feature_names_in_ + ['grid_point']
         else:
             feature_names = [f"feature_{i}" for i in range(self.n_features_in_)] + ['grid_point']
             
-        X_df_expanded = pd.DataFrame(X_expanded, columns=feature_names[:-1])
-        X_df_expanded['grid_point'] = grid_tile
-        
         # 7. Configure LightGBM
-        # We use 'cross_entropy' (aka binary logloss) because our targets are 
-        # continuous probabilities between 0 and 1.
         params = {
             'objective': 'cross_entropy', # Allows targets in [0,1]
             'metric': 'cross_entropy',
@@ -169,7 +193,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         params.update(self.lgbm_kwargs)
         
         self.model_ = LGBMRegressor(**params)
-        self.model_.fit(X_df_expanded, y_targets_soft)
+        # Pass numpy array directly + feature names
+        self.model_.fit(X_final, y_targets_soft, feature_name=feature_names)
         
         return self
 
