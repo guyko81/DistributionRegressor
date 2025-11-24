@@ -154,6 +154,115 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         else:
             self.sigma_val_ = float(self.sigma)
 
+    def _solve_sigma(self, y_true, probs, grid, current_sigma):
+        """
+        Updates sigma using the EM-like update derived from Natural Gradient / Maximum Likelihood.
+        sigma_new^2 = (1/N) * sum_i sum_j P(bin_j | y_i) * (y_i - g_j)^2
+        where P(bin_j | y_i) is the posterior probability of the bin given the prediction and observation.
+        """
+        # Precompute squared diffs: (n_samples, n_bins)
+        diff_sq = (y_true[:, None] - grid[None, :]) ** 2
+        
+        # Calculate Likelihoods P(y_i | bin_j) ~ Gaussian(y_i - g_j, sigma)
+        # We drop the normalization constant 1/(sigma*sqrt(2pi)) as it cancels out in the posterior weights
+        likelihoods = np.exp(-diff_sq / (2 * current_sigma ** 2))
+        
+        # Compute Unnormalized Posteriors: Prior(bin_j) * Likelihood(y_i | bin_j)
+        # Prior is the model's predicted probability 'probs'
+        posteriors_unnorm = probs * likelihoods
+        
+        # Normalize to get P(bin_j | y_i)
+        row_sums = posteriors_unnorm.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1.0 # Avoid division by zero
+        posteriors = posteriors_unnorm / row_sums
+        
+        # Expected Squared Error under the Posterior
+        # sum_j [ P(bin_j | y_i) * (y_i - g_j)^2 ]
+        expected_sq_err = np.sum(posteriors * diff_sq, axis=1)
+        
+        # Average over all samples to get sigma^2
+        new_sigma_sq = np.mean(expected_sq_err)
+        return np.sqrt(new_sigma_sq)
+
+    def fit(self, X, y):
+        """
+        Fit the model by expanding the dataset and training on soft targets.
+        If sigma='auto', performs an initial fit to estimate sigma, then refines it
+        using a Natural Gradient / EM-step approach.
+        """
+        self._validate_params()
+        
+        # 1. Prepare Data
+        self._is_dataframe = isinstance(X, pd.DataFrame)
+        if self._is_dataframe:
+            self.feature_names_in_ = X.columns.tolist()
+            X_array = X.values
+            y_array = np.asarray(y)
+        else:
+            X_array = X
+            y_array = y
+            
+        X_array, y_array = check_X_y(X_array, y_array, accept_sparse=False, dtype=np.float64)
+        self.n_features_in_ = X_array.shape[1]
+        n_samples = X_array.shape[0]
+
+        # 2. Define the Grid (The "Canvas")
+        y_min = float(np.min(y_array))
+        y_max = float(np.max(y_array))
+        
+        # Add a small buffer to the grid range
+        # margin = (y_max - y_min) * 0.1
+        margin = 0
+        self.grid_ = np.linspace(y_min - margin, y_max + margin, self.n_bins)
+        
+        # 3. Resolve Initial Sigma
+        if self.sigma == 'auto':
+            # Data-driven sigma: fit a baseline regressor to estimate inherent noise
+            baseline_params = {
+                'n_estimators': min(self.n_estimators, 100), # Faster initial fit
+                'learning_rate': self.learning_rate,
+                'random_state': self.random_state,
+                'verbose': -1
+            }
+            # Filter out non-LGBM params from kwargs if any
+            lgbm_params = self.lgbm_kwargs.copy()
+            baseline_params.update(lgbm_params)
+            
+            baseline_model = LGBMRegressor(**baseline_params)
+            baseline_model.fit(X_array, y_array)
+            y_pred = baseline_model.predict(X_array)
+            
+            # Calculate residuals
+            residuals = y_array - y_pred
+            std_resid = np.std(residuals)
+            
+            # Calculate grid step size
+            grid_step = (self.grid_[-1] - self.grid_[0]) / (self.n_bins - 1)
+            
+            # --- NEW: Learn Sigma directly using a second model (Heteroscedastic) ---
+            # We want to predict sigma ~ |y - y_pred|. 
+            # We train a regressor on log((y - y_pred)^2) to predict log(sigma^2).
+            # This is mathematically equivalent to the "Natural Gradient" step for scale
+            # where we find sigma that best explains the residual variance.
+            
+            log_resid_sq = np.log((residuals ** 2) + 1e-9) # Add epsilon for stability
+            
+            sigma_model = LGBMRegressor(**baseline_params)
+            sigma_model.fit(X_array, log_resid_sq)
+            log_sigma_sq_pred = sigma_model.predict(X_array)
+            
+            # Convert back to sigma: sigma = sqrt(exp(log_sigma_sq))
+            sigma_pred = np.sqrt(np.exp(log_sigma_sq_pred))
+            
+            # Clip sigma to be at least some fraction of grid step to avoid collapsing to a spike
+            # and at least some small value to avoid numeric instability
+            min_sigma = grid_step * 0.5
+            self.sigma_val_ = np.maximum(sigma_pred, min_sigma)
+            
+            # self.sigma_val_ is now an array of shape (n_samples,)
+        else:
+            self.sigma_val_ = float(self.sigma)
+
         # 4. Expand Dataset Efficiently (Pre-allocation + Broadcasting)
         # We construct the expanded matrix directly to save memory.
         # Shape: (n_samples * n_bins, n_features + 1)
@@ -170,9 +279,15 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         
         # 5. Generate Soft Targets Efficiently
         # Broadcast y and grid to compute diffs: (n_samples, n_bins)
-        # Avoids creating huge 1D repeated arrays
         diff_sq = (y_array[:, None] - self.grid_[None, :]) ** 2
-        targets = np.exp(-diff_sq / (2 * self.sigma_val_ ** 2))
+        
+        # Handle sigma broadcasting: scalar vs array
+        if np.ndim(self.sigma_val_) == 0:
+            sigma_sq = self.sigma_val_ ** 2
+        else:
+            sigma_sq = (self.sigma_val_ ** 2)[:, None] # (n_samples, 1) to broadcast against (n_samples, n_bins)
+
+        targets = np.exp(-diff_sq / (2 * sigma_sq))
         targets[targets < 1e-5] = 0.0
         y_targets_soft = targets.ravel()
         
@@ -196,7 +311,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         self.model_ = LGBMRegressor(**params)
         # Pass numpy array directly + feature names
         self.model_.fit(X_final, y_targets_soft, feature_name=feature_names)
-        
+
         return self
 
     def predict_distribution(self, X):
