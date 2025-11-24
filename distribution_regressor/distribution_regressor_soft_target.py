@@ -18,6 +18,7 @@ from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 from lightgbm import LGBMRegressor # We use Regressor but with cross_entropy objective
 import warnings
 from scipy.special import softmax
+from scipy.ndimage import gaussian_filter1d
 
 class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
     """
@@ -38,6 +39,12 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         - Small sigma: Target looks like a sharp spike (One-Hot).
         - Large sigma: Target looks like a wide bell curve.
     
+    output_smoothing : float, default=1.0
+        Standard deviation for Gaussian smoothing of the output distribution.
+        Applies a Gaussian filter to smooth the predicted probability distribution,
+        which helps reduce jaggedness in the output PDF. Set to 0.0 to disable.
+        Higher values produce smoother distributions.
+    
     n_estimators : int, default=100
         Number of boosting trees.
     
@@ -55,6 +62,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         self,
         n_bins=50,
         sigma=1.0,
+        output_smoothing=1.0,
         n_estimators=100,
         learning_rate=0.1,
         random_state=None,
@@ -62,6 +70,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
     ):
         self.n_bins = n_bins
         self.sigma = sigma
+        self.output_smoothing = output_smoothing
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate
         self.random_state = random_state
@@ -167,6 +176,19 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
     def predict_distribution(self, X):
         """
         Returns grid points and probability distribution for each sample.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples for which to predict distributions.
+        
+        Returns
+        -------
+        grid : array of shape (n_bins,)
+            Grid points over the target variable range.
+        
+        distributions : array of shape (n_samples, n_bins)
+            Probability distribution for each sample at each grid point.
         """
         check_is_fitted(self)
         
@@ -206,6 +228,15 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         row_sums[row_sums == 0] = 1.0
         distributions = scores_matrix / row_sums
         
+        # 5. Apply output smoothing if enabled
+        if self.output_smoothing > 0:
+            distributions = gaussian_filter1d(distributions, sigma=self.output_smoothing, axis=1)
+            
+            # Renormalize to ensure sum = 1.0
+            row_sums = distributions.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1.0
+            distributions = distributions / row_sums
+        
         return self.grid_, distributions
 
     def predict(self, X):
@@ -213,15 +244,57 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         return self.predict_mean(X)
 
     def predict_mean(self, X):
+        """
+        Predict the mean of the distribution for each sample.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+        
+        Returns
+        -------
+        means : array of shape (n_samples,)
+            Predicted means.
+        """
         grid, dists = self.predict_distribution(X)
         return np.sum(dists * grid, axis=1)
 
     def predict_mode(self, X):
+        """
+        Predict the mode (peak) of the distribution for each sample.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+        
+        Returns
+        -------
+        modes : array of shape (n_samples,)
+            Predicted modes.
+        """
         grid, dists = self.predict_distribution(X)
         max_indices = np.argmax(dists, axis=1)
         return grid[max_indices]
 
     def predict_quantile(self, X, q=0.5):
+        """
+        Predict quantile(s) of the distribution for each sample.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+        
+        q : float, default=0.5
+            Quantile to compute, in [0, 1].
+        
+        Returns
+        -------
+        quantiles : array of shape (n_samples,)
+            Predicted quantiles.
+        """
         grid, dists = self.predict_distribution(X)
         # Cumulative sum
         cdfs = np.cumsum(dists, axis=1)
