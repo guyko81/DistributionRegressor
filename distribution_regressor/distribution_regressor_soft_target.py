@@ -82,11 +82,20 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         if self.n_bins < 2:
             raise ValueError("n_bins must be >= 2")
 
-    def fit(self, X, y):
+    def fit(self, X, y, sample_weight=None):
         """
         Fit the model by expanding the dataset and training on soft targets.
         If sigma='auto', performs an initial fit to estimate sigma, then refines it
         using a Natural Gradient / EM-step approach.
+        
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Training data.
+        y : array-like of shape (n_samples,)
+            Target values.
+        sample_weight : array-like of shape (n_samples,), optional
+            Individual weights for each sample.
         """
         self._validate_params()
         
@@ -103,6 +112,12 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         X_array, y_array = check_X_y(X_array, y_array, accept_sparse=False, dtype=np.float64)
         self.n_features_in_ = X_array.shape[1]
         n_samples = X_array.shape[0]
+        
+        # Validate sample_weight
+        if sample_weight is not None:
+            sample_weight = np.asarray(sample_weight, dtype=np.float64)
+            if sample_weight.shape[0] != n_samples:
+                raise ValueError(f"sample_weight has {sample_weight.shape[0]} samples, expected {n_samples}")
 
         # 2. Define the Grid (The "Canvas")
         y_min = float(np.min(y_array))
@@ -127,7 +142,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             baseline_params.update(lgbm_params)
             
             baseline_model = LGBMRegressor(**baseline_params)
-            baseline_model.fit(X_array, y_array)
+            baseline_model.fit(X_array, y_array, sample_weight=sample_weight)
             y_pred = baseline_model.predict(X_array)
             
             # Calculate residuals
@@ -146,7 +161,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             log_resid_sq = np.log((residuals ** 2) + 1e-9) # Add epsilon for stability
             
             sigma_model = LGBMRegressor(**baseline_params)
-            sigma_model.fit(X_array, log_resid_sq)
+            sigma_model.fit(X_array, log_resid_sq, sample_weight=sample_weight)
             log_sigma_sq_pred = sigma_model.predict(X_array)
             
             # Convert back to sigma: sigma = sqrt(exp(log_sigma_sq))
@@ -207,8 +222,15 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         params.update(self.lgbm_kwargs)
         
         self.model_ = LGBMRegressor(**params)
+        
+        # Expand sample_weight to match expanded dataset
+        if sample_weight is not None:
+            sample_weight_expanded = np.repeat(sample_weight, self.n_bins)
+        else:
+            sample_weight_expanded = None
+            
         # Pass numpy array directly + feature names
-        self.model_.fit(X_final, y_targets_soft, feature_name=feature_names)
+        self.model_.fit(X_final, y_targets_soft, sample_weight=sample_weight_expanded, feature_name=feature_names)
 
         return self
 
