@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="distribution-regressor",
-    version="1.2.0",
+    version="1.3.0",
     author="Gabor Gulyas",
     author_email="",
     description="Nonparametric distributional regression using LightGBM",
