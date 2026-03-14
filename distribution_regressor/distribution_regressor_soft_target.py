@@ -111,6 +111,13 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         X_expanded['grid_point'] = grid_points
         return X_expanded
 
+    def _per_sample_grids(self, base_preds):
+        """Compute per-sample residual grids bounded to [y_min, y_max] in absolute space."""
+        r_min = np.maximum(self.grid_[0], self.y_min_ - base_preds)
+        r_max = np.minimum(self.grid_[-1], self.y_max_ - base_preds)
+        t = np.linspace(0, 1, self.n_bins)
+        return r_min[:, None] + t[None, :] * (r_max - r_min)[:, None]
+
     def fit(self, X, y, sample_weight=None):
         """
         Fit the model by expanding the dataset and training on soft targets.
@@ -135,6 +142,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
 
         X_df = self._to_dataframe(X)
         y_array = np.asarray(y, dtype=np.float64)
+        self.y_min_ = float(np.min(y_array))
+        self.y_max_ = float(np.max(y_array))
         self.n_features_in_ = X_df.shape[1]
         n_samples = X_df.shape[0]
 
@@ -174,11 +183,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         # 3. Define the Grid
         t_min = float(np.min(target_for_grid))
         t_max = float(np.max(target_for_grid))
-        if self.use_base_model:
-            margin = (t_max - t_min) * 0.1
-            self.grid_ = np.linspace(t_min - margin, t_max + margin, self.n_bins)
-        else:
-            self.grid_ = np.linspace(t_min, t_max, self.n_bins)
+        self.grid_ = np.linspace(t_min, t_max, self.n_bins)
 
         # 4. Resolve Sigma
         if self.sigma == 'auto':
@@ -203,6 +208,11 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         # ------------------------------------------------------------------
         # 5. Training Expansion
         # ------------------------------------------------------------------
+        if self.use_base_model:
+            # Per-sample bounded residual ranges
+            r_min = np.maximum(t_min, self.y_min_ - oof_predictions)
+            r_max = np.minimum(t_max, self.y_max_ - oof_predictions)
+
         if self.monte_carlo_training:
             K = self.mc_samples
             rng = np.random.default_rng(self.random_state)
@@ -219,7 +229,14 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             # Uniform tail points
             n_uniform = K - 1 - n_gauss
             if n_uniform > 0:
-                g_points[:, 1+n_gauss:] = rng.uniform(t_min, t_max, size=(n_samples, n_uniform))
+                if self.use_base_model:
+                    g_points[:, 1+n_gauss:] = r_min[:, None] + rng.uniform(0, 1, size=(n_samples, n_uniform)) * (r_max - r_min)[:, None]
+                else:
+                    g_points[:, 1+n_gauss:] = rng.uniform(t_min, t_max, size=(n_samples, n_uniform))
+
+            # Clip MC points to valid per-sample range
+            if self.use_base_model:
+                g_points = np.clip(g_points, r_min[:, None], r_max[:, None])
 
             grid_points_flat = g_points.ravel()
 
@@ -240,7 +257,12 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             mc_weights = iw.ravel()
         else:
             K = self.n_bins
-            grid_points_flat = np.tile(self.grid_, n_samples)
+            if self.use_base_model:
+                # Per-sample grids bounded to [y_min, y_max]
+                per_sample_grids = self._per_sample_grids(oof_predictions)
+                grid_points_flat = per_sample_grids.ravel()
+            else:
+                grid_points_flat = np.tile(self.grid_, n_samples)
 
         # Build expanded DataFrame (preserves original dtypes)
         X_expanded = self._expand_with_grid_points(X_df, grid_points_flat, K)
@@ -281,13 +303,28 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         return self
 
     def _predict_internal_distribution(self, X, output_smoothing=1.0):
-        """Predict distribution on the internal grid (residual space if base model is used)."""
+        """
+        Predict distribution on per-sample grids.
+
+        Returns
+        -------
+        grids : array of shape (n_samples, n_bins)
+            Per-sample grid points (residual space if base model is used).
+        distributions : array of shape (n_samples, n_bins)
+            Probability distribution for each sample.
+        """
         check_is_fitted(self)
 
         X_df = self._to_dataframe(X)
         n_samples = X_df.shape[0]
 
-        grid_points_flat = np.tile(self.grid_, n_samples)
+        if self.base_model_ is not None:
+            base_preds = self.base_model_.predict(X_df)
+            grids = self._per_sample_grids(base_preds)
+        else:
+            grids = np.tile(self.grid_, (n_samples, 1))
+
+        grid_points_flat = grids.ravel()
         X_expanded = self._expand_with_grid_points(X_df, grid_points_flat, self.n_bins)
 
         pred_scores = self.model_.predict(X_expanded)
@@ -303,7 +340,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             row_sums[row_sums == 0] = 1.0
             distributions /= row_sums
 
-        return self.grid_, distributions
+        return grids, distributions
 
     def predict_distribution(self, X, output_smoothing=1.0):
         """
@@ -320,9 +357,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
 
         Returns
         -------
-        grid : array of shape (n_bins,)
-            Grid points. When use_base_model=True, this is the residual grid.
-            The absolute grid for sample i is: grid + base_offsets[i].
+        grids : array of shape (n_samples, n_bins)
+            Per-sample grid points in absolute space.
 
         distributions : array of shape (n_samples, n_bins)
             Probability distribution for each sample at each grid point.
@@ -330,11 +366,12 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         base_offsets : array of shape (n_samples,)
             Per-sample shift from the base model prediction.
             Zeros when use_base_model=False.
-            Absolute grid for sample i: grid + base_offsets[i].
         """
-        grid, dists = self._predict_internal_distribution(X, output_smoothing)
+        grids, dists = self._predict_internal_distribution(X, output_smoothing)
         base_offsets = self.base_model_.predict(X) if self.base_model_ is not None else np.zeros(len(X))
-        return grid, dists, base_offsets
+        # Convert residual grids to absolute space
+        absolute_grids = grids + base_offsets[:, None]
+        return absolute_grids, dists, base_offsets
 
     def predict(self, X):
         """Default: Predict Mean"""
@@ -357,8 +394,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         """
         if self.base_model_ is not None:
             return self.base_model_.predict(X)
-        grid, dists = self._predict_internal_distribution(X)
-        return dists @ grid
+        grids, dists = self._predict_internal_distribution(X)
+        return np.sum(grids * dists, axis=1)
 
     def predict_mode(self, X):
         """
@@ -374,9 +411,9 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         modes : array of shape (n_samples,)
             Predicted modes.
         """
-        grid, dists = self._predict_internal_distribution(X)
+        grids, dists = self._predict_internal_distribution(X)
         max_indices = np.argmax(dists, axis=1)
-        modes = grid[max_indices]
+        modes = grids[np.arange(len(grids)), max_indices]
         if self.base_model_ is not None:
             modes += self.base_model_.predict(X)
         return modes
@@ -398,7 +435,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         quantiles : array of shape (n_samples,) or (n_samples, n_quantiles)
             Predicted quantiles.
         """
-        grid, dists = self._predict_internal_distribution(X)
+        grids, dists = self._predict_internal_distribution(X)
         cdfs = np.cumsum(dists, axis=1)
         cdfs[:, -1] = 1.0
 
@@ -407,7 +444,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
 
         mask = cdfs[:, None, :] >= q_arr[None, :, None]
         indices = mask.argmax(axis=2)
-        quantiles = grid[indices]
+        rows = np.arange(len(grids))[:, None]
+        quantiles = grids[rows, indices]
 
         if self.base_model_ is not None:
             base_pred = self.base_model_.predict(X)
@@ -454,8 +492,148 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         stds : array of shape (n_samples,)
             Predicted standard deviations.
         """
-        grid, dists = self._predict_internal_distribution(X)
-        means = dists @ grid
-        expected_sq = dists @ (grid ** 2)
+        grids, dists = self._predict_internal_distribution(X)
+        means = np.sum(grids * dists, axis=1)
+        expected_sq = np.sum(grids ** 2 * dists, axis=1)
         variance = expected_sq - means ** 2
         return np.sqrt(np.maximum(variance, 0.0))
+
+    def pdf(self, X, y, eps=1e-10):
+        """
+        Evaluate the predicted probability density at given y values.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+        y : array-like of shape (n_samples,)
+            Target values at which to evaluate the density.
+        eps : float, default=1e-10
+            Floor value to avoid zero densities.
+
+        Returns
+        -------
+        densities : array of shape (n_samples,)
+            Predicted density f(y|X) for each sample.
+        """
+        grids, dists = self._predict_internal_distribution(X)
+        y_array = np.asarray(y, dtype=np.float64)
+
+        # Per-sample bin widths
+        bin_widths = grids[:, 1] - grids[:, 0]
+        density_grid = dists / bin_widths[:, None]
+
+        # Shift y into residual space if base model is used
+        if self.base_model_ is not None:
+            y_residual = y_array - self.base_model_.predict(X)
+        else:
+            y_residual = y_array
+
+        # Per-sample linear interpolation
+        y_clipped = np.clip(y_residual, grids[:, 0], grids[:, -1])
+        frac_idx = (y_clipped - grids[:, 0]) / bin_widths
+        idx_lo = np.floor(frac_idx).astype(int)
+        idx_hi = np.minimum(idx_lo + 1, self.n_bins - 1)
+        alpha = frac_idx - idx_lo
+
+        rows = np.arange(len(y_array))
+        densities = (1 - alpha) * density_grid[rows, idx_lo] + alpha * density_grid[rows, idx_hi]
+        return np.maximum(densities, eps)
+
+    def logpdf(self, X, y, eps=1e-10):
+        """
+        Evaluate the log probability density at given y values.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+        y : array-like of shape (n_samples,)
+            Target values at which to evaluate the log-density.
+        eps : float, default=1e-10
+            Floor value to avoid log(0).
+
+        Returns
+        -------
+        log_densities : array of shape (n_samples,)
+            Log predicted density log f(y|X) for each sample.
+        """
+        return np.log(self.pdf(X, y, eps=eps))
+
+    def cdf(self, X, y):
+        """
+        Evaluate the predicted cumulative distribution function at given y values.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+        y : array-like of shape (n_samples,)
+            Target values at which to evaluate the CDF.
+
+        Returns
+        -------
+        probabilities : array of shape (n_samples,)
+            Predicted P(Y <= y | X) for each sample.
+        """
+        grids, dists = self._predict_internal_distribution(X)
+        y_array = np.asarray(y, dtype=np.float64)
+
+        # Shift y into residual space if base model is used
+        if self.base_model_ is not None:
+            y_residual = y_array - self.base_model_.predict(X)
+        else:
+            y_residual = y_array
+
+        # Cumulative sums of probability masses
+        cumsum = np.cumsum(dists, axis=1)
+        bin_widths = grids[:, 1] - grids[:, 0]
+
+        # Per-sample linear interpolation on the CDF
+        y_clipped = np.clip(y_residual, grids[:, 0], grids[:, -1])
+        frac_idx = (y_clipped - grids[:, 0]) / bin_widths
+        idx_lo = np.floor(frac_idx).astype(int)
+        idx_hi = np.minimum(idx_lo + 1, self.n_bins - 1)
+        alpha = frac_idx - idx_lo
+
+        rows = np.arange(len(y_array))
+        cdf_vals = (1 - alpha) * cumsum[rows, idx_lo] + alpha * cumsum[rows, idx_hi]
+        return np.clip(cdf_vals, 0.0, 1.0)
+
+    def ppf(self, X, q=0.5):
+        """
+        Percent point function (inverse CDF / quantile function).
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+        q : float or array-like, default=0.5
+            Quantile(s) to compute, in [0, 1].
+
+        Returns
+        -------
+        quantiles : array of shape (n_samples,) or (n_samples, n_quantiles)
+            Predicted quantile values.
+        """
+        return self.predict_quantile(X, q=q)
+
+    def nll(self, X, y, eps=1e-10):
+        """
+        Compute mean negative log-likelihood.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples.
+        y : array-like of shape (n_samples,)
+            True target values.
+        eps : float, default=1e-10
+            Floor value to avoid log(0).
+
+        Returns
+        -------
+        nll : float
+            Mean negative log-likelihood: -mean(log f(y|X)).
+        """
+        return -np.mean(self.logpdf(X, y, eps=eps))
