@@ -320,18 +320,21 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
 
         Returns
         -------
-        grid : array of shape (n_bins,) or (n_samples, n_bins) if use_base_model=True
-            Grid points over the target variable range.
-            When use_base_model=True, each sample has its own shifted grid.
+        grid : array of shape (n_bins,)
+            Grid points. When use_base_model=True, this is the residual grid.
+            The absolute grid for sample i is: grid + base_offsets[i].
 
         distributions : array of shape (n_samples, n_bins)
             Probability distribution for each sample at each grid point.
+
+        base_offsets : array of shape (n_samples,)
+            Per-sample shift from the base model prediction.
+            Zeros when use_base_model=False.
+            Absolute grid for sample i: grid + base_offsets[i].
         """
         grid, dists = self._predict_internal_distribution(X, output_smoothing)
-        if self.base_model_ is not None:
-            base_pred = self.base_model_.predict(X)
-            grid = grid[None, :] + base_pred[:, None]
-        return grid, dists
+        base_offsets = self.base_model_.predict(X) if self.base_model_ is not None else np.zeros(len(X))
+        return grid, dists, base_offsets
 
     def predict(self, X):
         """Default: Predict Mean"""
