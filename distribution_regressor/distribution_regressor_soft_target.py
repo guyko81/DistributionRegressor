@@ -14,23 +14,22 @@ This approach allows for:
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
-from lightgbm import LGBMRegressor # We use Regressor but with cross_entropy objective
-import warnings
-from scipy.special import softmax
+from sklearn.utils.validation import check_is_fitted
+from lightgbm import LGBMRegressor
 from scipy.ndimage import gaussian_filter1d
+from sklearn.model_selection import cross_val_predict, KFold
 
 class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
     """
-    Predicts probability distributions using a single gradient boosted model 
+    Predicts probability distributions using a single gradient boosted model
     trained on soft targets (Gaussian kernel smoothing).
-    
+
     Parameters
     ----------
     n_bins : int, default=50
         Number of grid points to discretize the target variable range.
         Higher = higher resolution but more memory usage (RAM usage is ~ n_samples * n_bins).
-    
+
     sigma : float or str, default=1.0
         The standard deviation of the Gaussian kernel used to generate soft targets.
         - If float: Constant spread around the true y.
@@ -40,54 +39,82 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         Controls the "dragging" effect:
         - Small sigma: Target looks like a sharp spike (One-Hot).
         - Large sigma: Target looks like a wide bell curve.
-    
-    output_smoothing : float, default=1.0
-        Standard deviation for Gaussian smoothing of the output distribution.
-        Applies a Gaussian filter to smooth the predicted probability distribution,
-        which helps reduce jaggedness in the output PDF. Set to 0.0 to disable.
-        Higher values produce smoother distributions.
-    
+
+    use_base_model : bool, default=True
+        If True, trains a base LGBMRegressor for point predictions and builds
+        the soft-target model on CV residuals. This anchors point predictions
+        to RMSE-optimal estimates and learns the residual distribution.
+        If False, the soft-target model is trained directly on raw y.
+
+    monte_carlo_training : bool, default=True
+        If True, use Monte Carlo sampling for training expansion (K points per
+        sample instead of the full grid). Much more memory-efficient.
+        If False, use full grid expansion (each sample crossed with all n_bins
+        grid points).
+
+    mc_samples : int, default=5
+        Number of Monte Carlo sample points per observation when
+        monte_carlo_training=True. Ignored when monte_carlo_training=False.
+
     n_estimators : int, default=100
         Number of boosting trees.
-    
+
     learning_rate : float, default=0.1
         Boosting learning rate.
-        
+
     random_state : int or None, default=None
         Random seed.
-        
+
     **kwargs : dict
         Additional parameters passed to LGBMRegressor.
     """
-    
+
     def __init__(
         self,
         n_bins=50,
         sigma='auto',
-        output_smoothing=1.0,
+        use_base_model=True,
         n_estimators=100,
         learning_rate=0.1,
+        monte_carlo_training=True,
+        mc_samples=5,
         random_state=None,
         **kwargs
     ):
         self.n_bins = n_bins
         self.sigma = sigma
-        self.output_smoothing = output_smoothing
+        self.use_base_model = use_base_model
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate
+        self.monte_carlo_training = monte_carlo_training
+        self.mc_samples = mc_samples
         self.random_state = random_state
         self.lgbm_kwargs = kwargs
-        
+
     def _validate_params(self):
         if self.n_bins < 2:
             raise ValueError("n_bins must be >= 2")
 
+    def _to_dataframe(self, X):
+        """Convert X to DataFrame if it isn't one already, using stored feature names."""
+        if isinstance(X, pd.DataFrame):
+            return X
+        return pd.DataFrame(X, columns=self.feature_names_in_)
+
+    def _expand_with_grid_points(self, X_df, grid_points, K):
+        """
+        Repeat each row of X_df K times and append grid_point column.
+        Preserves original dtypes.
+        """
+        idx = np.repeat(np.arange(len(X_df)), K)
+        X_expanded = X_df.iloc[idx].reset_index(drop=True)
+        X_expanded['grid_point'] = grid_points
+        return X_expanded
+
     def fit(self, X, y, sample_weight=None):
         """
         Fit the model by expanding the dataset and training on soft targets.
-        If sigma='auto', performs an initial fit to estimate sigma, then refines it
-        using a Natural Gradient / EM-step approach.
-        
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
@@ -98,121 +125,140 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             Individual weights for each sample.
         """
         self._validate_params()
-        
-        # 1. Prepare Data
+
+        # 1. Prepare Data — preserve original dtypes throughout
         self._is_dataframe = isinstance(X, pd.DataFrame)
         if self._is_dataframe:
             self.feature_names_in_ = X.columns.tolist()
-            X_array = X.values
-            y_array = np.asarray(y)
         else:
-            X_array = X
-            y_array = y
-            
-        X_array, y_array = check_X_y(X_array, y_array, accept_sparse=False, dtype=np.float64)
-        self.n_features_in_ = X_array.shape[1]
-        n_samples = X_array.shape[0]
-        
-        # Validate sample_weight
+            self.feature_names_in_ = [f"feature_{i}" for i in range(np.asarray(X).shape[1])]
+
+        X_df = self._to_dataframe(X)
+        y_array = np.asarray(y, dtype=np.float64)
+        self.n_features_in_ = X_df.shape[1]
+        n_samples = X_df.shape[0]
+
         if sample_weight is not None:
             sample_weight = np.asarray(sample_weight, dtype=np.float64)
-            if sample_weight.shape[0] != n_samples:
-                raise ValueError(f"sample_weight has {sample_weight.shape[0]} samples, expected {n_samples}")
 
-        # 2. Define the Grid (The "Canvas")
-        y_min = float(np.min(y_array))
-        y_max = float(np.max(y_array))
-        
-        # Add a small buffer to the grid range
-        # margin = (y_max - y_min) * 0.1
-        margin = 0
-        self.grid_ = np.linspace(y_min - margin, y_max + margin, self.n_bins)
-        
-        # 3. Resolve Initial Sigma
+        # Full params for the base model (same as user-specified)
+        full_params = {
+            'n_estimators': self.n_estimators,
+            'learning_rate': self.learning_rate,
+            'random_state': self.random_state,
+            'verbose': -1
+        }
+        full_params.update(self.lgbm_kwargs)
+
+        baseline_params = {**full_params, 'n_estimators': min(self.n_estimators, 100)}
+        cv_params = {'sample_weight': sample_weight} if sample_weight is not None else None
+
+        # 2. Base model + OOF residuals (optional)
+        if self.use_base_model:
+            self.base_model_ = LGBMRegressor(**full_params)
+            self.base_model_.fit(X_df, y_array, sample_weight=sample_weight)
+
+            kf = KFold(n_splits=5, shuffle=True, random_state=self.random_state)
+            oof_predictions = np.zeros(n_samples)
+            for train_idx, val_idx in kf.split(X_df):
+                fold_model = LGBMRegressor(**full_params)
+                fold_sw = sample_weight[train_idx] if sample_weight is not None else None
+                fold_model.fit(X_df.iloc[train_idx], y_array[train_idx], sample_weight=fold_sw)
+                oof_predictions[val_idx] = fold_model.predict(X_df.iloc[val_idx])
+
+            target_for_grid = y_array - oof_predictions
+        else:
+            self.base_model_ = None
+            target_for_grid = y_array
+
+        # 3. Define the Grid
+        t_min = float(np.min(target_for_grid))
+        t_max = float(np.max(target_for_grid))
+        if self.use_base_model:
+            margin = (t_max - t_min) * 0.1
+            self.grid_ = np.linspace(t_min - margin, t_max + margin, self.n_bins)
+        else:
+            self.grid_ = np.linspace(t_min, t_max, self.n_bins)
+
+        # 4. Resolve Sigma
         if self.sigma == 'auto':
-            # Data-driven sigma: fit a baseline regressor to estimate inherent noise
-            baseline_params = {
-                'n_estimators': min(self.n_estimators, 100), # Faster initial fit
-                'learning_rate': self.learning_rate,
-                'random_state': self.random_state,
-                'verbose': -1
-            }
-            # Filter out non-LGBM params from kwargs if any
-            lgbm_params = self.lgbm_kwargs.copy()
-            baseline_params.update(lgbm_params)
-            
-            baseline_model = LGBMRegressor(**baseline_params)
-            baseline_model.fit(X_array, y_array, sample_weight=sample_weight)
-            y_pred = baseline_model.predict(X_array)
-            
-            # Calculate residuals
-            residuals = y_array - y_pred
-            std_resid = np.std(residuals)
-            
-            # Calculate grid step size
+            if self.use_base_model:
+                residuals = target_for_grid
+            else:
+                baseline_model = LGBMRegressor(**baseline_params)
+                y_pred_cv = cross_val_predict(baseline_model, X_df, y_array, cv=5, params=cv_params)
+                residuals = y_array - y_pred_cv
+
             grid_step = (self.grid_[-1] - self.grid_[0]) / (self.n_bins - 1)
-            
-            # --- NEW: Learn Sigma directly using a second model (Heteroscedastic) ---
-            # We want to predict sigma ~ |y - y_pred|. 
-            # We train a regressor on log((y - y_pred)^2) to predict log(sigma^2).
-            # This is mathematically equivalent to the "Natural Gradient" step for scale
-            # where we find sigma that best explains the residual variance.
-            
-            log_resid_sq = np.log((residuals ** 2) + 1e-9) # Add epsilon for stability
-            
+
+            log_resid_sq = np.log((residuals ** 2) + 1e-9)
             sigma_model = LGBMRegressor(**baseline_params)
-            sigma_model.fit(X_array, log_resid_sq, sample_weight=sample_weight)
-            log_sigma_sq_pred = sigma_model.predict(X_array)
-            
-            # Convert back to sigma: sigma = sqrt(exp(log_sigma_sq))
+            log_sigma_sq_pred = cross_val_predict(sigma_model, X_df, log_resid_sq, cv=5, params=cv_params)
+
             sigma_pred = np.sqrt(np.exp(log_sigma_sq_pred))
-            
-            # Clip sigma to be at least some fraction of grid step to avoid collapsing to a spike
-            # and at least some small value to avoid numeric instability
-            min_sigma = grid_step * 0.5
-            self.sigma_val_ = np.maximum(sigma_pred, min_sigma)
-            
-            # self.sigma_val_ is now an array of shape (n_samples,)
+            self.sigma_val_ = np.maximum(sigma_pred, grid_step * 0.5)
         else:
             self.sigma_val_ = float(self.sigma)
 
-        # 4. Expand Dataset Efficiently (Pre-allocation + Broadcasting)
-        # We construct the expanded matrix directly to save memory.
-        # Shape: (n_samples * n_bins, n_features + 1)
-        # This avoids intermediate copies from np.repeat and pd.DataFrame
-        n_total_rows = n_samples * self.n_bins
-        X_final = np.empty((n_total_rows, self.n_features_in_ + 1), dtype=X_array.dtype)
-        
-        # Fill feature columns using broadcasting
-        # View X_final's feature part as (n_samples, n_bins, n_features)
-        X_final[:, :-1].reshape(n_samples, self.n_bins, -1)[:] = X_array[:, None, :]
-        
-        # Fill grid_point column using broadcasting
-        X_final[:, -1].reshape(n_samples, self.n_bins)[:] = self.grid_
-        
-        # 5. Generate Soft Targets Efficiently
-        # Broadcast y and grid to compute diffs: (n_samples, n_bins)
-        diff_sq = (y_array[:, None] - self.grid_[None, :]) ** 2
-        
-        # Handle sigma broadcasting: scalar vs array
+        # ------------------------------------------------------------------
+        # 5. Training Expansion
+        # ------------------------------------------------------------------
+        if self.monte_carlo_training:
+            K = self.mc_samples
+            rng = np.random.default_rng(self.random_state)
+            g_points = np.empty((n_samples, K))
+
+            # Point 0: exact peak
+            g_points[:, 0] = target_for_grid
+
+            # Gaussian slope points
+            n_gauss = max((K - 1) // 2, 1)
+            sig_b = self.sigma_val_ if np.ndim(self.sigma_val_) == 0 else self.sigma_val_[:, None]
+            g_points[:, 1:1+n_gauss] = target_for_grid[:, None] + rng.standard_normal((n_samples, n_gauss)) * sig_b
+
+            # Uniform tail points
+            n_uniform = K - 1 - n_gauss
+            if n_uniform > 0:
+                g_points[:, 1+n_gauss:] = rng.uniform(t_min, t_max, size=(n_samples, n_uniform))
+
+            grid_points_flat = g_points.ravel()
+
+            # Importance weights
+            domain_width = t_max - t_min
+            iw = np.empty((n_samples, K))
+            iw[:, 0] = 1.0 / K
+
+            gauss_points = g_points[:, 1:1+n_gauss]
+            sig_arr = self.sigma_val_ if np.ndim(self.sigma_val_) == 0 else self.sigma_val_[:, None]
+            gauss_pdf = np.exp(-((gauss_points - target_for_grid[:, None]) ** 2) / (2 * sig_arr ** 2)) / (sig_arr * np.sqrt(2 * np.pi))
+            iw[:, 1:1+n_gauss] = (1.0 / domain_width) / (gauss_pdf + 1e-12)
+
+            if n_uniform > 0:
+                iw[:, 1+n_gauss:] = 1.0
+
+            iw /= iw.mean()
+            mc_weights = iw.ravel()
+        else:
+            K = self.n_bins
+            grid_points_flat = np.tile(self.grid_, n_samples)
+
+        # Build expanded DataFrame (preserves original dtypes)
+        X_expanded = self._expand_with_grid_points(X_df, grid_points_flat, K)
+
+        # 6. Generate Soft Targets
+        diff_sq = (np.repeat(target_for_grid, K) - grid_points_flat) ** 2
+
         if np.ndim(self.sigma_val_) == 0:
             sigma_sq = self.sigma_val_ ** 2
         else:
-            sigma_sq = (self.sigma_val_ ** 2)[:, None] # (n_samples, 1) to broadcast against (n_samples, n_bins)
+            sigma_sq = np.repeat(self.sigma_val_, K) ** 2
 
-        targets = np.exp(-diff_sq / (2 * sigma_sq))
-        targets[targets < 1e-5] = 0.0
-        y_targets_soft = targets.ravel()
-        
-        # 6. Feature Names
-        if self._is_dataframe:
-            feature_names = self.feature_names_in_ + ['grid_point']
-        else:
-            feature_names = [f"feature_{i}" for i in range(self.n_features_in_)] + ['grid_point']
-            
-        # 7. Configure LightGBM
+        y_targets_soft = np.exp(-diff_sq / (2 * sigma_sq))
+        y_targets_soft[y_targets_soft < 1e-5] = 0.0
+
+        # 7. Configure and Train LightGBM
         params = {
-            'objective': 'cross_entropy', # Allows targets in [0,1]
+            'objective': 'cross_entropy',
             'metric': 'cross_entropy',
             'n_estimators': self.n_estimators,
             'learning_rate': self.learning_rate,
@@ -220,85 +266,72 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             'verbose': -1
         }
         params.update(self.lgbm_kwargs)
-        
+
         self.model_ = LGBMRegressor(**params)
-        
-        # Expand sample_weight to match expanded dataset
-        if sample_weight is not None:
-            sample_weight_expanded = np.repeat(sample_weight, self.n_bins)
+
+        if self.monte_carlo_training:
+            sample_weight_expanded = mc_weights
+            if sample_weight is not None:
+                sample_weight_expanded = sample_weight_expanded * np.repeat(sample_weight, K)
         else:
-            sample_weight_expanded = None
-            
-        # Pass numpy array directly + feature names
-        self.model_.fit(X_final, y_targets_soft, sample_weight=sample_weight_expanded, feature_name=feature_names)
+            sample_weight_expanded = np.repeat(sample_weight, K) if sample_weight is not None else None
+
+        self.model_.fit(X_expanded, y_targets_soft, sample_weight=sample_weight_expanded)
 
         return self
 
-    def predict_distribution(self, X):
+    def _predict_internal_distribution(self, X, output_smoothing=1.0):
+        """Predict distribution on the internal grid (residual space if base model is used)."""
+        check_is_fitted(self)
+
+        X_df = self._to_dataframe(X)
+        n_samples = X_df.shape[0]
+
+        grid_points_flat = np.tile(self.grid_, n_samples)
+        X_expanded = self._expand_with_grid_points(X_df, grid_points_flat, self.n_bins)
+
+        pred_scores = self.model_.predict(X_expanded)
+        distributions = pred_scores.reshape(n_samples, self.n_bins)
+
+        row_sums = distributions.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1.0
+        distributions /= row_sums
+
+        if output_smoothing > 0:
+            gaussian_filter1d(distributions, sigma=output_smoothing, axis=1, output=distributions)
+            row_sums = distributions.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1.0
+            distributions /= row_sums
+
+        return self.grid_, distributions
+
+    def predict_distribution(self, X, output_smoothing=1.0):
         """
         Returns grid points and probability distribution for each sample.
-        
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
             Samples for which to predict distributions.
-        
+
+        output_smoothing : float, default=1.0
+            Standard deviation for Gaussian smoothing of the output distribution.
+            Helps reduce jaggedness in the predicted PDF. Set to 0.0 to disable.
+
         Returns
         -------
-        grid : array of shape (n_bins,)
+        grid : array of shape (n_bins,) or (n_samples, n_bins) if use_base_model=True
             Grid points over the target variable range.
-        
+            When use_base_model=True, each sample has its own shifted grid.
+
         distributions : array of shape (n_samples, n_bins)
             Probability distribution for each sample at each grid point.
         """
-        check_is_fitted(self)
-        
-        if isinstance(X, pd.DataFrame):
-            X_array = X.values
-        else:
-            X_array = X
-        X_array = check_array(X_array, accept_sparse=False)
-        n_samples = X_array.shape[0]
-        
-        # 1. Expand X for prediction
-        X_expanded = np.repeat(X_array, self.n_bins, axis=0)
-        grid_tile = np.tile(self.grid_, n_samples)
-        
-        if self._is_dataframe:
-            feature_names = self.feature_names_in_
-        else:
-            feature_names = [f"feature_{i}" for i in range(self.n_features_in_)]
-            
-        X_df_expanded = pd.DataFrame(X_expanded, columns=feature_names)
-        X_df_expanded['grid_point'] = grid_tile
-        
-        # 2. Predict raw probability scores (Sigmoid applied by LGBM automatically for cross_entropy?)
-        # NOTE: LGBMRegressor with cross_entropy usually outputs sigmoid(raw_score) 
-        # automatically if we just call predict. Let's assume output is in [0,1].
-        pred_scores = self.model_.predict(X_df_expanded)
-        
-        # 3. Reshape to (n_samples, n_bins)
-        scores_matrix = pred_scores.reshape(n_samples, self.n_bins)
-        
-        # 4. Normalize to valid Probability Distribution (Sum = 1.0)
-        # We use simple normalization (divide by sum) rather than Softmax
-        # because the model was trained to predict absolute "plausibility" (0 to 1).
-        # If the model predicts [0.5, 0.5], it means both are equally plausible.
-        row_sums = scores_matrix.sum(axis=1, keepdims=True)
-        # Avoid division by zero
-        row_sums[row_sums == 0] = 1.0
-        distributions = scores_matrix / row_sums
-        
-        # 5. Apply output smoothing if enabled
-        if self.output_smoothing > 0:
-            distributions = gaussian_filter1d(distributions, sigma=self.output_smoothing, axis=1)
-            
-            # Renormalize to ensure sum = 1.0
-            row_sums = distributions.sum(axis=1, keepdims=True)
-            row_sums[row_sums == 0] = 1.0
-            distributions = distributions / row_sums
-        
-        return self.grid_, distributions
+        grid, dists = self._predict_internal_distribution(X, output_smoothing)
+        if self.base_model_ is not None:
+            base_pred = self.base_model_.predict(X)
+            grid = grid[None, :] + base_pred[:, None]
+        return grid, dists
 
     def predict(self, X):
         """Default: Predict Mean"""
@@ -307,77 +340,76 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
     def predict_mean(self, X):
         """
         Predict the mean of the distribution for each sample.
-        
+        When use_base_model=True, returns the base model's prediction directly.
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
             Samples.
-        
+
         Returns
         -------
         means : array of shape (n_samples,)
             Predicted means.
         """
-        grid, dists = self.predict_distribution(X)
-        return np.sum(dists * grid, axis=1)
+        if self.base_model_ is not None:
+            return self.base_model_.predict(X)
+        grid, dists = self._predict_internal_distribution(X)
+        return dists @ grid
 
     def predict_mode(self, X):
         """
         Predict the mode (peak) of the distribution for each sample.
-        
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
             Samples.
-        
+
         Returns
         -------
         modes : array of shape (n_samples,)
             Predicted modes.
         """
-        grid, dists = self.predict_distribution(X)
+        grid, dists = self._predict_internal_distribution(X)
         max_indices = np.argmax(dists, axis=1)
-        return grid[max_indices]
+        modes = grid[max_indices]
+        if self.base_model_ is not None:
+            modes += self.base_model_.predict(X)
+        return modes
 
     def predict_quantile(self, X, q=0.5):
         """
         Predict quantile(s) of the distribution for each sample.
-        
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
             Samples.
-        
+
         q : float or array-like, default=0.5
             Quantile(s) to compute, in [0, 1].
-        
+
         Returns
         -------
         quantiles : array of shape (n_samples,) or (n_samples, n_quantiles)
             Predicted quantiles.
         """
-        grid, dists = self.predict_distribution(X)
-        # Cumulative sum
+        grid, dists = self._predict_internal_distribution(X)
         cdfs = np.cumsum(dists, axis=1)
-        
-        # Handle scalar vs array q
-        q_arr = np.asarray(q)
-        is_scalar = q_arr.ndim == 0
-        if is_scalar:
-            q_arr = q_arr.reshape(1)
-            
-        n_samples = len(X)
-        n_quantiles = len(q_arr)
-        quantiles = np.zeros((n_samples, n_quantiles))
-        
-        for i in range(n_samples):
-            # Find index where CDF >= q
-            # searchsorted works with array q
-            indices = np.searchsorted(cdfs[i], q_arr)
-            # Clip to bounds
-            indices = np.clip(indices, 0, self.n_bins - 1)
-            quantiles[i] = grid[indices]
-            
+        cdfs[:, -1] = 1.0
+
+        q_arr = np.atleast_1d(q)
+        is_scalar = np.ndim(q) == 0
+
+        mask = cdfs[:, None, :] >= q_arr[None, :, None]
+        indices = mask.argmax(axis=2)
+        quantiles = grid[indices]
+
+        if self.base_model_ is not None:
+            base_pred = self.base_model_.predict(X)
+            quantiles = quantiles + base_pred[:, None]
+
         if is_scalar:
             return quantiles.flatten()
         return quantiles
@@ -385,15 +417,15 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
     def predict_interval(self, X, confidence=0.95):
         """
         Predict prediction interval for each sample.
-        
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
             Samples.
-        
+
         confidence : float, default=0.95
             Confidence level (e.g., 0.95 for 95% interval).
-            
+
         Returns
         -------
         intervals : array of shape (n_samples, 2)
@@ -402,24 +434,25 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         alpha = 1.0 - confidence
         q_low = alpha / 2.0
         q_high = 1.0 - alpha / 2.0
-        
         return self.predict_quantile(X, q=[q_low, q_high])
 
     def predict_std(self, X):
         """
         Predict standard deviation of the distribution for each sample.
-        
+        (Shift-invariant: same whether in residual or absolute space.)
+
         Parameters
         ----------
         X : array-like of shape (n_samples, n_features)
             Samples.
-            
+
         Returns
         -------
         stds : array of shape (n_samples,)
             Predicted standard deviations.
         """
-        grid, dists = self.predict_distribution(X)
-        means = np.sum(dists * grid, axis=1, keepdims=True)
-        variance = np.sum(dists * (grid - means)**2, axis=1)
-        return np.sqrt(variance)
+        grid, dists = self._predict_internal_distribution(X)
+        means = dists @ grid
+        expected_sq = dists @ (grid ** 2)
+        variance = expected_sq - means ** 2
+        return np.sqrt(np.maximum(variance, 0.0))
