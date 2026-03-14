@@ -302,7 +302,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
 
         return self
 
-    def _predict_internal_distribution(self, X, output_smoothing=1.0):
+    def _predict_internal_distribution(self, X, output_smoothing=0):
         """
         Predict distribution on per-sample grids.
 
@@ -342,7 +342,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
 
         return grids, distributions
 
-    def predict_distribution(self, X, output_smoothing=1.0):
+    def predict_distribution(self, X, output_smoothing=0):
         """
         Returns grid points and probability distribution for each sample.
 
@@ -351,9 +351,9 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         X : array-like of shape (n_samples, n_features)
             Samples for which to predict distributions.
 
-        output_smoothing : float, default=1.0
+        output_smoothing : float, default=0
             Standard deviation for Gaussian smoothing of the output distribution.
-            Helps reduce jaggedness in the predicted PDF. Set to 0.0 to disable.
+            Helps reduce jaggedness in the predicted PDF. Set to 0 to disable.
 
         Returns
         -------
@@ -498,7 +498,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         variance = expected_sq - means ** 2
         return np.sqrt(np.maximum(variance, 0.0))
 
-    def pdf(self, X, y, eps=1e-10):
+    def pdf(self, X, y, output_smoothing=0, eps=1e-10):
         """
         Evaluate the predicted probability density at given y values.
 
@@ -508,6 +508,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             Samples.
         y : array-like of shape (n_samples,)
             Target values at which to evaluate the density.
+        output_smoothing : float, default=0
+            Standard deviation for Gaussian smoothing of the distribution.
         eps : float, default=1e-10
             Floor value to avoid zero densities.
 
@@ -516,7 +518,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         densities : array of shape (n_samples,)
             Predicted density f(y|X) for each sample.
         """
-        grids, dists = self._predict_internal_distribution(X)
+        grids, dists = self._predict_internal_distribution(X, output_smoothing)
         y_array = np.asarray(y, dtype=np.float64)
 
         # Per-sample bin widths
@@ -540,7 +542,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         densities = (1 - alpha) * density_grid[rows, idx_lo] + alpha * density_grid[rows, idx_hi]
         return np.maximum(densities, eps)
 
-    def logpdf(self, X, y, eps=1e-10):
+    def logpdf(self, X, y, output_smoothing=0, eps=1e-10):
         """
         Evaluate the log probability density at given y values.
 
@@ -550,6 +552,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             Samples.
         y : array-like of shape (n_samples,)
             Target values at which to evaluate the log-density.
+        output_smoothing : float, default=0
+            Standard deviation for Gaussian smoothing of the distribution.
         eps : float, default=1e-10
             Floor value to avoid log(0).
 
@@ -558,9 +562,9 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         log_densities : array of shape (n_samples,)
             Log predicted density log f(y|X) for each sample.
         """
-        return np.log(self.pdf(X, y, eps=eps))
+        return np.log(self.pdf(X, y, output_smoothing=output_smoothing, eps=eps))
 
-    def cdf(self, X, y):
+    def cdf(self, X, y, output_smoothing=0):
         """
         Evaluate the predicted cumulative distribution function at given y values.
 
@@ -570,13 +574,15 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             Samples.
         y : array-like of shape (n_samples,)
             Target values at which to evaluate the CDF.
+        output_smoothing : float, default=0
+            Standard deviation for Gaussian smoothing of the distribution.
 
         Returns
         -------
         probabilities : array of shape (n_samples,)
             Predicted P(Y <= y | X) for each sample.
         """
-        grids, dists = self._predict_internal_distribution(X)
+        grids, dists = self._predict_internal_distribution(X, output_smoothing)
         y_array = np.asarray(y, dtype=np.float64)
 
         # Shift y into residual space if base model is used
@@ -618,7 +624,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         """
         return self.predict_quantile(X, q=q)
 
-    def nll(self, X, y, eps=1e-10):
+    def nll(self, X, y, output_smoothing=0, eps=1e-10):
         """
         Compute mean negative log-likelihood.
 
@@ -628,6 +634,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             Samples.
         y : array-like of shape (n_samples,)
             True target values.
+        output_smoothing : float, default=0
+            Standard deviation for Gaussian smoothing of the distribution.
         eps : float, default=1e-10
             Floor value to avoid log(0).
 
@@ -636,4 +644,4 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         nll : float
             Mean negative log-likelihood: -mean(log f(y|X)).
         """
-        return -np.mean(self.logpdf(X, y, eps=eps))
+        return -np.mean(self.logpdf(X, y, output_smoothing=output_smoothing, eps=eps))
