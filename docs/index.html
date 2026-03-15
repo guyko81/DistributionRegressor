@@ -163,16 +163,33 @@
     .btn-secondary:hover { background: rgba(255,255,255,0.25); }
     .install-box {
       margin-top: 16px;
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
       background: rgba(0,0,0,0.3);
       border-radius: 8px;
       padding: 12px 28px;
       font-family: 'JetBrains Mono', monospace;
       font-size: 1.05rem;
       color: #a5f3fc;
-      user-select: all;
+      position: relative;
     }
     .install-box span { color: #94a3b8; }
+    .copy-btn {
+      background: none;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 6px;
+      color: #94a3b8;
+      cursor: pointer;
+      padding: 4px 8px;
+      font-size: 0.8rem;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,0.1); color: #e2e8f0; }
+    .copy-btn.copied { color: #4ade80; border-color: #4ade80; }
 
     /* ── GENERIC SECTION STYLES ── */
     section h2 {
@@ -278,6 +295,8 @@
       color: var(--text-muted);
     }
     td { font-variant-numeric: tabular-nums; }
+    td img { display: block; }
+    td:has(img) { padding: 2px 4px; }
     tr:hover td { background: #f8fafc; }
 
     /* ── TWO-COLUMN COMPARISON ── */
@@ -359,7 +378,9 @@
     }
     .install-hero h2 { color: white; font-size: 2.2rem; margin-bottom: 24px; }
     .install-command {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      gap: 16px;
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.15);
       border-radius: 12px;
@@ -367,8 +388,8 @@
       font-family: 'JetBrains Mono', monospace;
       font-size: 1.3rem;
       color: #67e8f9;
-      user-select: all;
       margin-bottom: 12px;
+      position: relative;
     }
     .install-command .dollar { color: #64748b; margin-right: 8px; }
     .install-note {
@@ -476,8 +497,7 @@
     <div class="container">
       <h1>DistributionRegressor</h1>
       <p class="tagline">
-        Nonparametric distributional regression using LightGBM.
-        Predict full probability distributions p(y|x) - not just point estimates.
+        Nonparametric conditional density estimation using LightGBM with soft targets.
       </p>
       <div class="hero-cta">
         <a class="btn-primary" onclick="showPage('install')">Install</a>
@@ -486,31 +506,23 @@
       </div>
       <div class="install-box">
         <span>$</span> pip install distribution-regressor
+        <button class="copy-btn" onclick="copyCmd(this, 'pip install distribution-regressor')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
       </div>
     </div>
   </header>
 
   <section class="section-padding">
     <div class="container">
-      <h2>Why predict distributions?</h2>
+      <h2>Predictive uncertainty estimation</h2>
       <p class="section-lead">
-        Standard regression gives a single number. But real-world outcomes are uncertain, often skewed, and sometimes multimodal.
-        Full distributional predictions unlock richer decision-making.
+        Estimating the uncertainty in predictions is crucial for production deployments.
+        When model predictions drive automated decisions, knowing <em>how uncertain</em> a prediction is
+        determines when to fall back to manual review or human inspection.
+        Probabilistic prediction - where the model outputs a full distribution over outcomes - is
+        the natural way to quantify this.
       </p>
-      <div class="card-grid">
-        <div class="card">
-          <h4>Uncertainty Quantification</h4>
-          <p>Know <em>how confident</em> a prediction is. Get calibrated prediction intervals, not just point estimates.</p>
-        </div>
-        <div class="card">
-          <h4>Arbitrary Distribution Shapes</h4>
-          <p>Capture multimodal, skewed, heavy-tailed, or zero-inflated distributions - no parametric assumptions required.</p>
-        </div>
-        <div class="card">
-          <h4>Downstream Decisions</h4>
-          <p>Optimize expected utility, compute Value-at-Risk, or feed full densities into downstream systems.</p>
-        </div>
-      </div>
 
       <table style="margin-top: 32px;">
         <thead>
@@ -518,19 +530,19 @@
         </thead>
         <tbody>
           <tr>
+            <td><strong>Tomorrow's temperature</strong></td>
+            <td>73.4 F</td>
+            <td><img src="img/mini_temp.svg" alt="" style="height:72px;vertical-align:middle;" onerror="this.outerHTML='narrow peak around 73 F'"></td>
+          </tr>
+          <tr>
             <td><strong>Retail demand</strong></td>
-            <td>"Sell 142 units"</td>
-            <td>"80% chance between 120-170, slight chance of spike above 200"</td>
+            <td>142 units</td>
+            <td><img src="img/mini_demand.svg" alt="" style="height:72px;vertical-align:middle;" onerror="this.outerHTML='most mass 120-170, long tail above 200'"></td>
           </tr>
           <tr>
-            <td><strong>House price</strong></td>
-            <td>"$450,000"</td>
-            <td>"Most likely $430k-$480k, small secondary mode near $520k"</td>
-          </tr>
-          <tr>
-            <td><strong>Patient outcome</strong></td>
-            <td>"12 months"</td>
-            <td>"Bimodal: quick recovery by 6 mo or extended course around 18 mo"</td>
+            <td><strong>Patient survival</strong></td>
+            <td>11.3 months</td>
+            <td><img src="img/mini_survival.svg" alt="" style="height:72px;vertical-align:middle;" onerror="this.outerHTML='bimodal: peaks at 6 mo and 18 mo'"></td>
           </tr>
         </tbody>
       </table>
@@ -541,8 +553,9 @@
     <div class="container">
       <h2>How it works</h2>
       <p class="section-lead">
-        DistributionRegressor uses a <strong>soft-target approach</strong> that turns distributional regression
-        into a single gradient boosted model trained with cross-entropy loss.
+        The target range is discretized into a grid. For each training sample, a Gaussian kernel centered at the
+        true y value produces soft targets across the grid. The dataset is expanded into (x, grid_point) pairs,
+        and a single LightGBM model is trained with cross-entropy loss to predict the soft target values.
       </p>
       <div class="diagram">
         <div class="diagram-box">
@@ -566,14 +579,15 @@
         </div>
       </div>
       <p>
-        At inference, for a new input <strong>x</strong>, we query the model at every grid point and
-        normalize the outputs to obtain a proper probability distribution.
+        At inference, the model is queried at every grid point for a given x, and the outputs are
+        normalized to form a proper density.
       </p>
       <div class="highlight-box" style="margin-top: 28px;">
-        <strong>Comparison with NGBoost:</strong> NGBoost uses natural gradient boosting to learn parameters of a
-        <em>parametric</em> distribution (e.g., Normal, LogNormal). DistributionRegressor is fully nonparametric - it learns
-        the distribution shape directly, making it better suited for complex real-world distributions. It also
-        sometimes even ~100x faster since it uses a single LightGBM model rather than sequential boosting with Hessian computations.
+        <strong>Comparison with NGBoost:</strong> NGBoost uses natural gradient boosting to fit parameters of a
+        parametric distribution (e.g., Normal, LogNormal). This package is nonparametric - it learns
+        the density shape directly, so it can represent multimodal or irregular distributions without
+        choosing a parametric family. Training is also sometimes even ~100x faster since it fits a single
+        LightGBM model rather than sequential boosting with per-sample Hessian computations.
       </div>
     </div>
   </section>
@@ -600,6 +614,9 @@
       <h2>Installation</h2>
       <div class="install-command">
         <span class="dollar">$</span>pip install distribution-regressor
+        <button class="copy-btn" onclick="copyCmd(this, 'pip install distribution-regressor')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
       </div>
       <p class="install-note">Requires Python &ge; 3.8</p>
     </div>
@@ -1157,6 +1174,17 @@ model = DistributionRegressor(monte_carlo_training=<span class="num">True</span>
 
 <!-- ══════════════ JAVASCRIPT ══════════════ -->
 <script>
+function copyCmd(btn, text) {
+  navigator.clipboard.writeText(text).then(function() {
+    btn.classList.add('copied');
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+    setTimeout(function() {
+      btn.classList.remove('copied');
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+    }, 2000);
+  });
+}
+
 function showPage(name) {
   // Hide all pages
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
