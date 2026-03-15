@@ -2,6 +2,8 @@
 
 Nonparametric distributional regression using LightGBM. Predicts full probability distributions p(y|x) instead of just point estimates.
 
+**[Documentation](https://guyko81.github.io/DistributionRegressor/)** | **[PyPI](https://pypi.org/project/distribution-regressor/)** | **[Examples](https://guyko81.github.io/DistributionRegressor/#examples)**
+
 ## Overview
 
 `DistributionRegressor` provides a robust way to predict complete probability distributions over continuous targets. Unlike standard regression that outputs a single value, this package allows you to:
