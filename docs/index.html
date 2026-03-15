@@ -118,7 +118,7 @@
     .hero {
       background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
       color: white;
-      padding: 80px 0 64px;
+      padding: 32px 0;
       text-align: center;
     }
     .hero h1 {
@@ -496,55 +496,58 @@
 <div id="page-overview" class="page active">
 
   <header class="hero">
-    <div class="container">
-      <h1>DistributionRegressor</h1>
-      <p class="tagline">
-        Nonparametric conditional density estimation using LightGBM with soft targets.
-      </p>
-      <div class="hero-cta">
-        <a class="btn-primary" onclick="showPage('install')">Install</a>
-        <a class="btn-secondary" onclick="showPage('guide')">Get Started</a>
-        <a class="btn-secondary" onclick="showPage('examples')">See Examples</a>
+    <div class="container" style="display:flex; align-items:center; justify-content:space-between; gap:32px; text-align:left;">
+      <div style="flex:1;">
+        <h1 style="margin-bottom: 6px;">DistributionRegressor</h1>
+        <p class="tagline" style="margin-bottom: 0;">
+          Nonparametric conditional density estimation using LightGBM with soft targets.
+        </p>
       </div>
-      <div class="install-box">
-        <span>$</span> pip install distribution-regressor
-        <button class="copy-btn" onclick="copyCmd(this, 'pip install distribution-regressor')">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-        </button>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:10px; flex-shrink:0;">
+        <div class="install-box">
+          <span>$</span> pip install distribution-regressor
+          <button class="copy-btn" onclick="copyCmd(this, 'pip install distribution-regressor')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </button>
+        </div>
+        <div class="hero-cta" style="margin-top:0;">
+          <a class="btn-primary" onclick="showPage('guide')">Get Started</a>
+          <a class="btn-secondary" onclick="showPage('examples')">Examples</a>
+          <a class="btn-secondary" onclick="showPage('api')">API</a>
+        </div>
       </div>
     </div>
   </header>
 
-  <section class="section-padding">
+  <section style="padding: 28px 0 20px;">
     <div class="container">
-      <h2>Predictive uncertainty estimation</h2>
-      <p class="section-lead">
-        Estimating the uncertainty in predictions is crucial for production deployments.
-        When model predictions drive automated decisions, knowing <em>how uncertain</em> a prediction is
-        determines when to fall back to manual review or human inspection.
-        Probabilistic prediction - where the model outputs a full distribution over outcomes - is
-        the natural way to quantify this.
+      <p class="section-lead" style="margin-bottom: 8px;">
+        When model predictions drive automated decisions, a single number is not enough.
+        Probabilistic prediction outputs the full distribution, revealing uncertainty, skew, and multimodality.
       </p>
 
-      <table style="margin-top: 32px;">
+      <table style="margin-top: 12px;">
         <thead>
-          <tr><th></th><th>Point Prediction</th><th>Probabilistic Prediction</th></tr>
+          <tr><th></th><th>Point Prediction</th><th>Probabilistic Prediction</th><th></th></tr>
         </thead>
         <tbody>
           <tr>
             <td><strong>Tomorrow's temperature</strong></td>
             <td>73.4 F</td>
             <td><img src="img/mini_temp.svg" alt="" style="height:72px;vertical-align:middle;" onerror="this.outerHTML='narrow peak around 73 F'"></td>
+            <td style="font-size:0.82rem;color:var(--text-muted);max-width:180px;">Symmetric, low variance. The <span style="color:#ef4444;">point estimate</span> works well here.</td>
           </tr>
           <tr>
             <td><strong>Retail demand</strong></td>
             <td>142 units</td>
             <td><img src="img/mini_demand.svg" alt="" style="height:72px;vertical-align:middle;" onerror="this.outerHTML='most mass 120-170, long tail above 200'"></td>
+            <td style="font-size:0.82rem;color:var(--text-muted);max-width:180px;">Right-skewed with a long tail. The <span style="color:#ef4444;">mean</span> underestimates the risk of high demand.</td>
           </tr>
           <tr>
-            <td><strong>Patient survival</strong></td>
-            <td>11.3 months</td>
-            <td><img src="img/mini_survival.svg" alt="" style="height:72px;vertical-align:middle;" onerror="this.outerHTML='bimodal: peaks at 6 mo and 18 mo'"></td>
+            <td><strong>Commute time</strong></td>
+            <td>33.5 min</td>
+            <td><img src="img/mini_commute.svg" alt="" style="height:72px;vertical-align:middle;" onerror="this.outerHTML='bimodal: 20 min (no traffic) or 50 min (rush hour)'"></td>
+            <td style="font-size:0.82rem;color:var(--text-muted);max-width:180px;">Bimodal: <span style="color:#22c55e;">20 min</span> or <span style="color:#22c55e;">50 min</span>. The <span style="color:#ef4444;">mean of 33.5</span> almost never happens.</td>
           </tr>
         </tbody>
       </table>
