@@ -573,7 +573,7 @@
         <strong>Comparison with NGBoost:</strong> NGBoost uses natural gradient boosting to learn parameters of a
         <em>parametric</em> distribution (e.g., Normal, LogNormal). DistributionRegressor is fully nonparametric - it learns
         the distribution shape directly, making it better suited for complex real-world distributions. It also
-        trains ~100x faster since it uses a single LightGBM model rather than sequential boosting with Hessian computations.
+        sometimes even ~100x faster since it uses a single LightGBM model rather than sequential boosting with Hessian computations.
       </div>
     </div>
   </section>
