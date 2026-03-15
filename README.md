@@ -63,7 +63,7 @@ DistributionRegressor(
     n_bins=50,              # Number of grid points (higher = more resolution, more RAM)
     sigma='auto',           # Kernel width for soft targets. 'auto' or float.
                             # Controls how "smeared" the probability is around true y.
-    output_smoothing=1.0,   # Gaussian smoothing on predicted distribution (0.0 to disable)
+    output_smoothing=0,     # Gaussian smoothing on predicted distribution (> 0 to enable)
     n_estimators=100,       # LightGBM trees
     learning_rate=0.1,      # Learning rate
     random_state=42,        # Seed

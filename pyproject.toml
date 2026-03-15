@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "distribution-regressor"
-version = "1.4.4"
+version = "1.5.0"
 description = "Nonparametric distributional regression using LightGBM"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -47,6 +47,6 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/guyko81/DistributionRegressor"
-Documentation = "https://github.com/guyko81/DistributionRegressor#readme"
+Documentation = "https://guyko81.github.io/DistributionRegressor/"
 Repository = "https://github.com/guyko81/DistributionRegressor"
 "Bug Tracker" = "https://github.com/guyko81/DistributionRegressor/issues"

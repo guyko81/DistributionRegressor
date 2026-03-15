@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DistributionRegressor - Nonparametric Distributional Regression</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --primary-light: #dbeafe;
+      --accent: #f59e0b;
+      --bg: #ffffff;
+      --bg-alt: #f8fafc;
+      --bg-code: #1e293b;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      --shadow-lg: 0 10px 25px rgba(0,0,0,0.1);
+      --radius: 8px;
+      --nav-height: 56px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      color: var(--text);
+      line-height: 1.7;
+      background: var(--bg);
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--nav-height);
+      background: var(--bg-code);
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .nav-brand {
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: white;
+      margin-right: 32px;
+      white-space: nowrap;
+    }
+    .nav-links {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+    }
+    .nav-links a {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 6px;
+      transition: all 0.15s;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .nav-links a:hover {
+      color: white;
+      background: rgba(255,255,255,0.08);
+    }
+    .nav-links a.active {
+      color: white;
+      background: var(--primary);
+    }
+    .nav-right {
+      margin-left: auto;
+      display: flex;
+      gap: 12px;
+    }
+    .nav-right a {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 6px 14px;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .nav-right a:hover {
+      color: white;
+      border-color: rgba(255,255,255,0.35);
+    }
+
+    /* ── PAGE CONTAINER ── */
+    .page {
+      display: none;
+      padding-top: var(--nav-height);
+      min-height: 100vh;
+    }
+    .page.active { display: block; }
+
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+    .section-padding {
+      padding: 56px 0;
+    }
+
+    /* ── HERO (Overview) ── */
+    .hero {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+      color: white;
+      padding: 80px 0 64px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: 2.8rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .hero .tagline {
+      font-size: 1.25rem;
+      opacity: 0.9;
+      max-width: 640px;
+      margin: 0 auto 32px;
+    }
+    .hero-cta {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .hero-cta a {
+      display: inline-block;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 1rem;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: white;
+      color: var(--primary-dark);
+    }
+    .btn-primary:hover { background: #f0f4ff; }
+    .btn-secondary {
+      background: rgba(255,255,255,0.15);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.25); }
+    .install-box {
+      margin-top: 16px;
+      display: inline-block;
+      background: rgba(0,0,0,0.3);
+      border-radius: 8px;
+      padding: 12px 28px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.05rem;
+      color: #a5f3fc;
+      user-select: all;
+    }
+    .install-box span { color: #94a3b8; }
+
+    /* ── GENERIC SECTION STYLES ── */
+    section h2 {
+      font-size: 1.9rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      letter-spacing: -0.01em;
+    }
+    section h3 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin: 32px 0 12px;
+    }
+    .section-lead {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      margin-bottom: 32px;
+      max-width: 720px;
+    }
+    .alt-bg { background: var(--bg-alt); }
+
+    /* ── CARDS ── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+      gap: 20px;
+      margin-top: 24px;
+    }
+    .card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      box-shadow: var(--shadow);
+    }
+    .card h4 { font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; }
+    .card p { color: var(--text-muted); font-size: 0.95rem; }
+
+    /* ── CODE ── */
+    pre {
+      background: var(--bg-code);
+      color: #e2e8f0;
+      border-radius: var(--radius);
+      padding: 24px;
+      overflow-x: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.88rem;
+      line-height: 1.6;
+      margin: 16px 0;
+      box-shadow: var(--shadow);
+    }
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.88em;
+    }
+    :not(pre) > code {
+      background: #f1f5f9;
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #be185d;
+    }
+    .kw { color: #c084fc; }
+    .fn { color: #67e8f9; }
+    .str { color: #86efac; }
+    .com { color: #64748b; }
+    .num { color: #fbbf24; }
+
+    /* ── FIGURES ── */
+    .figure {
+      margin: 32px 0;
+      text-align: center;
+    }
+    .figure img {
+      max-width: 100%;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+    }
+    .figure figcaption {
+      margin-top: 12px;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-style: italic;
+    }
+
+    /* ── TABLE ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 0.95rem;
+    }
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      background: var(--bg-alt);
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+    }
+    td { font-variant-numeric: tabular-nums; }
+    tr:hover td { background: #f8fafc; }
+
+    /* ── TWO-COLUMN COMPARISON ── */
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+      margin: 24px 0;
+    }
+    @media (max-width: 700px) { .comparison { grid-template-columns: 1fr; } }
+    .comparison > div {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+
+    /* ── DIAGRAM ── */
+    .diagram {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin: 32px 0;
+      flex-wrap: wrap;
+    }
+    .diagram-box {
+      background: white;
+      border: 2px solid var(--primary);
+      border-radius: var(--radius);
+      padding: 20px 28px;
+      text-align: center;
+      min-width: 160px;
+      box-shadow: var(--shadow);
+    }
+    .diagram-box .label { font-weight: 600; color: var(--primary); }
+    .diagram-box .sub { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
+    .diagram-arrow { font-size: 1.5rem; color: var(--primary); font-weight: 700; }
+
+    /* ── HIGHLIGHT BOX ── */
+    .highlight-box {
+      background: linear-gradient(135deg, #eff6ff, #f0f9ff);
+      border-left: 4px solid var(--primary);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 20px 24px;
+      margin: 24px 0;
+    }
+    .highlight-box.amber {
+      background: linear-gradient(135deg, #fffbeb, #fef3c7);
+      border-left-color: var(--accent);
+    }
+
+    /* ── API METHOD ── */
+    .api-method {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin: 12px 0;
+    }
+    .api-method .signature {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      color: var(--primary-dark);
+      font-weight: 500;
+    }
+    .api-method .desc {
+      margin-top: 6px;
+      color: var(--text-muted);
+      font-size: 0.92rem;
+    }
+
+    /* ── INSTALL PAGE ── */
+    .install-hero {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: white;
+      padding: 64px 0;
+      text-align: center;
+    }
+    .install-hero h2 { color: white; font-size: 2.2rem; margin-bottom: 24px; }
+    .install-command {
+      display: inline-block;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      padding: 20px 48px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.3rem;
+      color: #67e8f9;
+      user-select: all;
+      margin-bottom: 12px;
+    }
+    .install-command .dollar { color: #64748b; margin-right: 8px; }
+    .install-note {
+      color: #94a3b8;
+      font-size: 0.95rem;
+      margin-top: 12px;
+    }
+    .dep-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+    .dep-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+    }
+    .dep-card .name { font-weight: 600; font-size: 1rem; }
+    .dep-card .ver { color: var(--text-muted); font-size: 0.85rem; margin-top: 4px; }
+
+    /* ── SUB-NAV (tab bar within a page) ── */
+    .sub-nav {
+      background: var(--bg-alt);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      justify-content: center;
+      gap: 4px;
+      position: sticky;
+      top: var(--nav-height);
+      z-index: 90;
+    }
+    .sub-nav a {
+      display: inline-block;
+      padding: 14px 24px;
+      font-size: 0.92rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-decoration: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .sub-nav a:hover {
+      color: var(--text);
+      background: rgba(0,0,0,0.02);
+    }
+    .sub-nav a.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+    .sub-page { display: none; }
+    .sub-page.active { display: block; }
+
+    /* ── FOOTER ── */
+    footer {
+      background: var(--bg-code);
+      color: #94a3b8;
+      padding: 40px 0;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+    footer a { color: #67e8f9; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 2rem; }
+      .hero { padding: 48px 0 40px; }
+      .nav-brand { font-size: 0.95rem; margin-right: 16px; }
+      .nav-links a { font-size: 0.82rem; padding: 6px 10px; }
+      .nav-right { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════ NAVIGATION ══════════════ -->
+<nav>
+  <div class="nav-brand">DistributionRegressor</div>
+  <div class="nav-links">
+    <a class="active" onclick="showPage('overview')">Overview</a>
+    <a onclick="showPage('install')">Install</a>
+    <a onclick="showPage('guide')">Guide</a>
+    <a onclick="showPage('api')">API</a>
+    <a onclick="showPage('examples')">Examples</a>
+    <a onclick="showPage('options')">Options</a>
+  </div>
+  <div class="nav-right">
+    <a href="https://github.com/guyko81/DistributionRegressor">GitHub</a>
+    <a href="https://pypi.org/project/distribution-regressor/">PyPI</a>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     PAGE 1: OVERVIEW
+     ══════════════════════════════════════════════════════════════════ -->
+<div id="page-overview" class="page active">
+
+  <header class="hero">
+    <div class="container">
+      <h1>DistributionRegressor</h1>
+      <p class="tagline">
+        Nonparametric distributional regression using LightGBM.
+        Predict full probability distributions p(y|x) - not just point estimates.
+      </p>
+      <div class="hero-cta">
+        <a class="btn-primary" onclick="showPage('install')">Install</a>
+        <a class="btn-secondary" onclick="showPage('guide')">Get Started</a>
+        <a class="btn-secondary" onclick="showPage('examples')">See Examples</a>
+      </div>
+      <div class="install-box">
+        <span>$</span> pip install distribution-regressor
+      </div>
+    </div>
+  </header>
+
+  <section class="section-padding">
+    <div class="container">
+      <h2>Why predict distributions?</h2>
+      <p class="section-lead">
+        Standard regression gives a single number. But real-world outcomes are uncertain, often skewed, and sometimes multimodal.
+        Full distributional predictions unlock richer decision-making.
+      </p>
+      <div class="card-grid">
+        <div class="card">
+          <h4>Uncertainty Quantification</h4>
+          <p>Know <em>how confident</em> a prediction is. Get calibrated prediction intervals, not just point estimates.</p>
+        </div>
+        <div class="card">
+          <h4>Arbitrary Distribution Shapes</h4>
+          <p>Capture multimodal, skewed, heavy-tailed, or zero-inflated distributions - no parametric assumptions required.</p>
+        </div>
+        <div class="card">
+          <h4>Downstream Decisions</h4>
+          <p>Optimize expected utility, compute Value-at-Risk, or feed full densities into downstream systems.</p>
+        </div>
+      </div>
+
+      <table style="margin-top: 32px;">
+        <thead>
+          <tr><th></th><th>Point Prediction</th><th>Probabilistic Prediction</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Retail demand</strong></td>
+            <td>"Sell 142 units"</td>
+            <td>"80% chance between 120-170, slight chance of spike above 200"</td>
+          </tr>
+          <tr>
+            <td><strong>House price</strong></td>
+            <td>"$450,000"</td>
+            <td>"Most likely $430k-$480k, small secondary mode near $520k"</td>
+          </tr>
+          <tr>
+            <td><strong>Patient outcome</strong></td>
+            <td>"12 months"</td>
+            <td>"Bimodal: quick recovery by 6 mo or extended course around 18 mo"</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section-padding alt-bg">
+    <div class="container">
+      <h2>How it works</h2>
+      <p class="section-lead">
+        DistributionRegressor uses a <strong>soft-target approach</strong> that turns distributional regression
+        into a single gradient boosted model trained with cross-entropy loss.
+      </p>
+      <div class="diagram">
+        <div class="diagram-box">
+          <div class="label">1. Grid</div>
+          <div class="sub">Discretize y-range<br>into <code>n_bins</code> points</div>
+        </div>
+        <div class="diagram-arrow">&rarr;</div>
+        <div class="diagram-box">
+          <div class="label">2. Soft Targets</div>
+          <div class="sub">Gaussian kernel<br>around true y<sub>i</sub></div>
+        </div>
+        <div class="diagram-arrow">&rarr;</div>
+        <div class="diagram-box">
+          <div class="label">3. Expand</div>
+          <div class="sub">Cross (x<sub>i</sub>, g<sub>j</sub>)<br>pairs + targets</div>
+        </div>
+        <div class="diagram-arrow">&rarr;</div>
+        <div class="diagram-box">
+          <div class="label">4. Train</div>
+          <div class="sub">Single LightGBM<br>cross-entropy loss</div>
+        </div>
+      </div>
+      <p>
+        At inference, for a new input <strong>x</strong>, we query the model at every grid point and
+        normalize the outputs to obtain a proper probability distribution.
+      </p>
+      <div class="highlight-box" style="margin-top: 28px;">
+        <strong>Comparison with NGBoost:</strong> NGBoost uses natural gradient boosting to learn parameters of a
+        <em>parametric</em> distribution (e.g., Normal, LogNormal). DistributionRegressor is fully nonparametric - it learns
+        the distribution shape directly, making it better suited for complex real-world distributions. It also
+        trains ~100x faster since it uses a single LightGBM model rather than sequential boosting with Hessian computations.
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>
+        <a href="https://github.com/guyko81/DistributionRegressor">GitHub</a> &nbsp;&middot;&nbsp;
+        <a href="https://pypi.org/project/distribution-regressor/">PyPI</a> &nbsp;&middot;&nbsp;
+        MIT License
+      </p>
+      <p style="margin-top: 8px;">Gabor Gulyas &copy; 2025</p>
+    </div>
+  </footer>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     PAGE 2: INSTALL
+     ══════════════════════════════════════════════════════════════════ -->
+<div id="page-install" class="page">
+
+  <div class="install-hero">
+    <div class="container">
+      <h2>Installation</h2>
+      <div class="install-command">
+        <span class="dollar">$</span>pip install distribution-regressor
+      </div>
+      <p class="install-note">Requires Python &ge; 3.8</p>
+    </div>
+  </div>
+
+  <section class="section-padding">
+    <div class="container">
+      <h3>From source</h3>
+<pre><span class="com"># Clone and install in development mode</span>
+git clone https://github.com/guyko81/DistributionRegressor.git
+cd DistributionRegressor
+pip install -e .</pre>
+
+      <h3>Dependencies</h3>
+      <p style="color: var(--text-muted); margin-bottom: 16px;">
+        All dependencies are installed automatically via pip.
+      </p>
+      <div class="dep-grid">
+        <div class="dep-card">
+          <div class="name">LightGBM</div>
+          <div class="ver">&ge; 3.0.0</div>
+        </div>
+        <div class="dep-card">
+          <div class="name">NumPy</div>
+          <div class="ver">&ge; 1.20.0</div>
+        </div>
+        <div class="dep-card">
+          <div class="name">Pandas</div>
+          <div class="ver">&ge; 1.3.0</div>
+        </div>
+        <div class="dep-card">
+          <div class="name">scikit-learn</div>
+          <div class="ver">&ge; 1.0.0</div>
+        </div>
+        <div class="dep-card">
+          <div class="name">SciPy</div>
+          <div class="ver">&ge; 1.7.0</div>
+        </div>
+        <div class="dep-card">
+          <div class="name">joblib</div>
+          <div class="ver">&ge; 1.0.0</div>
+        </div>
+      </div>
+
+      <h3>Verify installation</h3>
+<pre><span class="kw">from</span> distribution_regressor <span class="kw">import</span> DistributionRegressor
+<span class="fn">print</span>(<span class="str">"Ready!"</span>)</pre>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>
+        <a href="https://github.com/guyko81/DistributionRegressor">GitHub</a> &nbsp;&middot;&nbsp;
+        <a href="https://pypi.org/project/distribution-regressor/">PyPI</a> &nbsp;&middot;&nbsp;
+        MIT License
+      </p>
+      <p style="margin-top: 8px;">Gabor Gulyas &copy; 2025</p>
+    </div>
+  </footer>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     PAGE 3: GUIDE (Quick Start)
+     ══════════════════════════════════════════════════════════════════ -->
+<div id="page-guide" class="page">
+
+  <section class="section-padding">
+    <div class="container">
+      <h2>Quick Start</h2>
+      <p class="section-lead">
+        Install and start predicting distributions in under 10 lines of code.
+      </p>
+
+<pre><span class="kw">from</span> distribution_regressor <span class="kw">import</span> DistributionRegressor
+
+<span class="com"># Initialize</span>
+model = DistributionRegressor(
+    n_bins=<span class="num">50</span>,           <span class="com"># grid resolution</span>
+    n_estimators=<span class="num">500</span>,    <span class="com"># LightGBM trees</span>
+    sigma=<span class="str">'auto'</span>,         <span class="com"># automatic kernel width</span>
+)
+
+<span class="com"># Train</span>
+model.<span class="fn">fit</span>(X_train, y_train)
+
+<span class="com"># Point predictions</span>
+y_mean = model.<span class="fn">predict</span>(X_test)           <span class="com"># expected value</span>
+y_mode = model.<span class="fn">predict_mode</span>(X_test)      <span class="com"># most likely value</span>
+
+<span class="com"># Uncertainty</span>
+intervals = model.<span class="fn">predict_interval</span>(X_test, confidence=<span class="num">0.9</span>)
+std = model.<span class="fn">predict_std</span>(X_test)
+
+<span class="com"># Full distribution</span>
+grids, dists, offsets = model.<span class="fn">predict_distribution</span>(X_test)
+
+<span class="com"># Evaluate density at specific points</span>
+density = model.<span class="fn">pdf</span>(X_test, y_test)
+nll = model.<span class="fn">nll</span>(X_test, y_test)</pre>
+
+      <h3>Visualization</h3>
+<pre><span class="kw">import</span> matplotlib.pyplot <span class="kw">as</span> plt
+
+<span class="com"># Predict distribution for a single sample</span>
+grids, dists, offsets = model.<span class="fn">predict_distribution</span>(X_test[<span class="num">0</span>:<span class="num">1</span>])
+
+plt.<span class="fn">plot</span>(grids[<span class="num">0</span>], dists[<span class="num">0</span>], label=<span class="str">'Predicted PDF'</span>)
+plt.<span class="fn">axvline</span>(y_test[<span class="num">0</span>], color=<span class="str">'r'</span>, linestyle=<span class="str">'--'</span>, label=<span class="str">'True Value'</span>)
+plt.<span class="fn">legend</span>()
+plt.<span class="fn">show</span>()</pre>
+    </div>
+  </section>
+
+  <section class="section-padding alt-bg">
+    <div class="container">
+      <h2>Key Parameters</h2>
+
+      <table>
+        <thead>
+          <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>n_bins</code></td><td>50</td>
+            <td>Grid resolution. Higher = finer distributions but more compute. 50-200 is typical.</td>
+          </tr>
+          <tr>
+            <td><code>sigma</code></td><td><code>'auto'</code></td>
+            <td>Kernel bandwidth for soft targets. <code>'auto'</code> estimates per-sample noise from CV residuals. Float for fixed width.</td>
+          </tr>
+          <tr>
+            <td><code>use_base_model</code></td><td><code>False</code></td>
+            <td>If True, fits an LGBM baseline and models residuals. Can improve RMSE at the cost of distribution shape fidelity.</td>
+          </tr>
+          <tr>
+            <td><code>monte_carlo_training</code></td><td><code>True</code></td>
+            <td>Sample grid points instead of full expansion. Reduces memory ~20x with minimal quality loss.</td>
+          </tr>
+          <tr>
+            <td><code>mc_samples</code></td><td>5</td>
+            <td>Number of grid points per sample in MC mode. 5-10 is usually enough.</td>
+          </tr>
+          <tr>
+            <td><code>n_estimators</code></td><td>100</td>
+            <td>Number of LightGBM boosting iterations.</td>
+          </tr>
+          <tr>
+            <td><code>learning_rate</code></td><td>0.1</td>
+            <td>Boosting learning rate.</td>
+          </tr>
+          <tr>
+            <td><code>**kwargs</code></td><td>-</td>
+            <td>Any LightGBM parameter: <code>max_depth</code>, <code>num_leaves</code>, <code>subsample</code>, <code>colsample_bytree</code>, etc.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>
+        <a href="https://github.com/guyko81/DistributionRegressor">GitHub</a> &nbsp;&middot;&nbsp;
+        <a href="https://pypi.org/project/distribution-regressor/">PyPI</a> &nbsp;&middot;&nbsp;
+        MIT License
+      </p>
+      <p style="margin-top: 8px;">Gabor Gulyas &copy; 2025</p>
+    </div>
+  </footer>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     PAGE 4: API
+     ══════════════════════════════════════════════════════════════════ -->
+<div id="page-api" class="page">
+
+  <section class="section-padding">
+    <div class="container">
+      <h2>API Reference</h2>
+      <p class="section-lead">Scikit-learn compatible interface with rich distributional methods.</p>
+
+      <h3>Constructor</h3>
+<pre>DistributionRegressor(
+    n_bins=<span class="num">50</span>,                <span class="com"># grid resolution (higher = finer distributions)</span>
+    sigma=<span class="str">'auto'</span>,              <span class="com"># kernel bandwidth: 'auto' or float</span>
+    use_base_model=<span class="num">False</span>,     <span class="com"># anchor to LGBM point predictions</span>
+    monte_carlo_training=<span class="num">True</span>,<span class="com"># memory-efficient MC sampling</span>
+    mc_samples=<span class="num">5</span>,             <span class="com"># MC points per sample</span>
+    n_estimators=<span class="num">100</span>,         <span class="com"># LightGBM trees</span>
+    learning_rate=<span class="num">0.1</span>,        <span class="com"># boosting learning rate</span>
+    **kwargs                  <span class="com"># passed to LGBMRegressor</span>
+)</pre>
+
+      <h3>Prediction Methods</h3>
+      <div class="api-method">
+        <div class="signature">model.predict(X) / model.predict_mean(X)</div>
+        <div class="desc">Expected value E[Y|X]. When <code>use_base_model=True</code>, returns the base LGBM prediction directly.</div>
+      </div>
+      <div class="api-method">
+        <div class="signature">model.predict_mode(X)</div>
+        <div class="desc">Most likely value (peak of the predicted density).</div>
+      </div>
+      <div class="api-method">
+        <div class="signature">model.predict_quantile(X, q=0.5)</div>
+        <div class="desc">Arbitrary quantile(s). Pass a list for multiple quantiles at once.</div>
+      </div>
+      <div class="api-method">
+        <div class="signature">model.predict_interval(X, confidence=0.95)</div>
+        <div class="desc">Symmetric prediction interval [lower, upper].</div>
+      </div>
+      <div class="api-method">
+        <div class="signature">model.predict_std(X)</div>
+        <div class="desc">Standard deviation of the predicted distribution.</div>
+      </div>
+      <div class="api-method">
+        <div class="signature">model.predict_distribution(X)</div>
+        <div class="desc">Full distribution: returns (grids, distributions, base_offsets).</div>
+      </div>
+
+      <h3>Density Evaluation</h3>
+      <div class="api-method">
+        <div class="signature">model.pdf(X, y)</div>
+        <div class="desc">Evaluate predicted density f(y|X) at specific y values.</div>
+      </div>
+      <div class="api-method">
+        <div class="signature">model.logpdf(X, y)</div>
+        <div class="desc">Log-density log f(y|X).</div>
+      </div>
+      <div class="api-method">
+        <div class="signature">model.cdf(X, y)</div>
+        <div class="desc">Cumulative distribution P(Y &le; y | X).</div>
+      </div>
+      <div class="api-method">
+        <div class="signature">model.ppf(X, q)</div>
+        <div class="desc">Inverse CDF / percent point function.</div>
+      </div>
+      <div class="api-method">
+        <div class="signature">model.nll(X, y)</div>
+        <div class="desc">Mean negative log-likelihood - a proper scoring rule for density evaluation.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-padding alt-bg">
+    <div class="container">
+      <h2>Citation</h2>
+<pre>@software{distributionregressor2025,
+  title  = {DistributionRegressor: Nonparametric Distributional Regression},
+  author = {Gabor Gulyas},
+  year   = {2025},
+  url    = {https://github.com/guyko81/DistributionRegressor}
+}</pre>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <p>
+        <a href="https://github.com/guyko81/DistributionRegressor">GitHub</a> &nbsp;&middot;&nbsp;
+        <a href="https://pypi.org/project/distribution-regressor/">PyPI</a> &nbsp;&middot;&nbsp;
+        MIT License
+      </p>
+      <p style="margin-top: 8px;">Gabor Gulyas &copy; 2025</p>
+    </div>
+  </footer>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     PAGE 5: EXAMPLES (with sub-tabs)
+     ══════════════════════════════════════════════════════════════════ -->
+<div id="page-examples" class="page">
+
+  <div class="sub-nav" id="examples-sub-nav">
+    <a class="active" onclick="showSubPage('examples', 'rossmann')">Rossmann Store Sales</a>
+    <a onclick="showSubPage('examples', 'ipums')">IPUMS Income (vs NGBoost)</a>
+  </div>
+
+  <!-- ── Sub-page: Rossmann ── -->
+  <div id="examples-rossmann" class="sub-page active">
+    <section class="section-padding">
+      <div class="container">
+        <h2>Rossmann Store Sales</h2>
+        <p class="section-lead">
+          Predicting daily sales for a retail store. The model captures day-of-week patterns,
+          promotional effects, and holiday uncertainty - including the hard zero on Sundays.
+        </p>
+
+        <p>
+          While the default is <code>use_base_model=False</code>, this is a case where enabling the base model
+          is beneficial. Retail sales for a single store are unimodal and well-behaved - the base model
+          anchors point predictions tightly, and the residual distribution captures the remaining uncertainty
+          with narrow, well-calibrated intervals.
+        </p>
+
+<pre><span class="kw">from</span> distribution_regressor <span class="kw">import</span> DistributionRegressor
+
+model = DistributionRegressor(
+    n_bins=<span class="num">100</span>, n_estimators=<span class="num">1000</span>, learning_rate=<span class="num">0.01</span>,
+    sigma=<span class="str">'auto'</span>, random_state=<span class="num">42</span>,
+    use_base_model=<span class="num">True</span>,  <span class="com"># beneficial here: unimodal, narrow uncertainty</span>
+)
+model.<span class="fn">fit</span>(train_data[features], train_data[<span class="str">'Sales'</span>])
+
+<span class="com"># Prediction intervals for time series visualization</span>
+p10 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.1</span>)
+p50 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.5</span>)
+p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</span>)</pre>
+
+        <h3>Time series with uncertainty bands</h3>
+        <figure class="figure">
+          <img src="img/rossmann_timeseries.png" alt="Rossmann sales time series with uncertainty bands">
+          <figcaption>
+            Predicted sales distribution for the test period (last 5 weeks). Blue = actual sales,
+            red bands = 10th-90th and 25th-75th percentile intervals.
+            The base model anchors predictions tightly, producing narrow uncertainty bands.
+            Sundays (dips to zero) are captured cleanly.
+          </figcaption>
+        </figure>
+
+        <h3>Individual distribution shapes</h3>
+        <p>
+          With <code>use_base_model=True</code>, the per-sample adaptive grid centers on the base prediction,
+          giving high resolution where it matters. The closed-day prediction collapses to a tight spike at zero:
+        </p>
+
+        <figure class="figure">
+          <img src="img/rossmann_densities.png" alt="Individual predicted densities for Rossmann samples">
+          <figcaption>
+            Predicted p(Sales|x) for selected test days. The closed day shows a sharp spike at zero.
+            Promo days have slightly wider spreads, while regular weekdays are tighter.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── Sub-page: IPUMS ── -->
+  <div id="examples-ipums" class="sub-page">
+    <section class="section-padding">
+      <div class="container">
+        <h2>IPUMS Income Distribution</h2>
+        <p class="section-lead">
+          Predicting the full income distribution conditional on demographic features (26 variables, 113k samples).
+          Compared against NGBoost on test-set negative log-likelihood.
+        </p>
+
+        <h3>Benchmark results</h3>
+        <table>
+          <thead>
+            <tr><th>Method</th><th>Test NLL</th><th>Weighted NLL</th><th>Training Time</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>DistributionRegressor</strong></td>
+              <td>11.30</td>
+              <td>11.32</td>
+              <td><strong>5 s</strong></td>
+            </tr>
+            <tr>
+              <td>NGBoost (LogNormal)</td>
+              <td><strong>11.11</strong></td>
+              <td><strong>11.15</strong></td>
+              <td>363 s</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="highlight-box">
+          <strong>Key takeaway:</strong> DistributionRegressor achieves competitive NLL within 0.2 nats of NGBoost,
+          while training <strong>~70x faster</strong> and without requiring any distributional assumptions.
+          NGBoost wins on NLL here because income is approximately log-normal and it uses the matching LogNormal
+          parametric family - a strong inductive bias when it happens to match the true distribution.
+        </div>
+
+        <h3>The limitation of parametric models</h3>
+        <p>
+          However, NGBoost's strength is also its weakness. With a LogNormal distribution, every prediction is
+          forced into a unimodal, right-skewed shape. When the true conditional distribution is multimodal or
+          has a complex shape, the parametric assumption breaks down.
+        </p>
+        <p style="margin-top: 12px;">
+          NGBoost can use more complex parametric families to mitigate this, but the user must choose the right
+          family in advance. DistributionRegressor sidesteps this entirely - it learns whatever shape the data requires.
+        </p>
+
+        <figure class="figure">
+          <img src="img/ipums_ngboost.png" alt="DistributionRegressor vs NGBoost on IPUMS data">
+          <figcaption>
+            DistributionRegressor (blue) captures multimodal and complex conditional densities that
+            NGBoost's LogNormal (green dashed) cannot represent. The parametric model is forced into a
+            single-mode shape regardless of the true data distribution.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="container">
+      <p>
+        <a href="https://github.com/guyko81/DistributionRegressor">GitHub</a> &nbsp;&middot;&nbsp;
+        <a href="https://pypi.org/project/distribution-regressor/">PyPI</a> &nbsp;&middot;&nbsp;
+        MIT License
+      </p>
+      <p style="margin-top: 8px;">Gabor Gulyas &copy; 2025</p>
+    </div>
+  </footer>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     PAGE 6: OPTIONS (with sub-tabs)
+     ══════════════════════════════════════════════════════════════════ -->
+<div id="page-options" class="page">
+
+  <div class="sub-nav" id="options-sub-nav">
+    <a class="active" onclick="showSubPage('options', 'baseline')">Base Model</a>
+    <a onclick="showSubPage('options', 'montecarlo')">Monte Carlo Training</a>
+  </div>
+
+  <!-- ── Sub-page: Base Model ── -->
+  <div id="options-baseline" class="sub-page active">
+    <section class="section-padding">
+      <div class="container">
+        <h2>With and without base model</h2>
+        <p class="section-lead">
+          The <code>use_base_model</code> option controls whether DistributionRegressor learns
+          distributions directly on the target, or on residuals from a preliminary LightGBM fit.
+        </p>
+
+        <div class="comparison">
+          <div>
+            <h4><code>use_base_model=False</code> (default)</h4>
+            <p>The soft-target model learns p(y|x) directly on the raw target variable.</p>
+            <ul style="margin-top: 12px; padding-left: 20px; color: var(--text-muted); font-size: 0.95rem;">
+              <li>Simpler - single model, no residual computation</li>
+              <li>Preserves multimodal structure in the data</li>
+              <li>Cleaner theoretical foundation</li>
+              <li>Recommended for most use cases</li>
+            </ul>
+          </div>
+          <div>
+            <h4><code>use_base_model=True</code></h4>
+            <p>First fits a standard LightGBM for point predictions, then models the <em>residual distribution</em> with soft targets.</p>
+            <ul style="margin-top: 12px; padding-left: 20px; color: var(--text-muted); font-size: 0.95rem;">
+              <li>Can improve point prediction (lower RMSE)</li>
+              <li>Per-sample adaptive grid centered on base prediction</li>
+              <li>Higher resolution in the likely region</li>
+              <li>Useful when RMSE performance is critical</li>
+            </ul>
+          </div>
+        </div>
+
+<pre><span class="com"># Without baseline (default) - learn full distribution directly</span>
+model_direct = DistributionRegressor(use_base_model=<span class="num">False</span>)
+model_direct.<span class="fn">fit</span>(X_train, y_train)
+
+<span class="com"># With baseline - learn residual distribution around point prediction</span>
+model_baseline = DistributionRegressor(use_base_model=<span class="num">True</span>)
+model_baseline.<span class="fn">fit</span>(X_train, y_train)</pre>
+
+        <h3>Calibration and RMSE</h3>
+        <figure class="figure">
+          <img src="img/baseline_comparison.png" alt="Calibration comparison with and without base model">
+          <figcaption>
+            Calibration plot and RMSE comparison on Rossmann test set.
+            The baseline model offers better RMSE but both modes show comparable calibration.
+          </figcaption>
+        </figure>
+
+        <h3>Trade-off: RMSE vs. distribution shape</h3>
+        <p>
+          While <code>use_base_model=True</code> often delivers better RMSE and can be better calibrated,
+          it models the <em>residual</em> distribution. This means the model learns a narrow, roughly
+          symmetric distribution centered near zero - which can obscure multimodal structure present in the
+          raw target. In cases where the conditional distribution has multiple modes, the direct model
+          (<code>use_base_model=False</code>) preserves this structure.
+        </p>
+
+        <figure class="figure">
+          <img src="img/baseline_multimodal.png" alt="Baseline mode losing multimodal structure">
+          <figcaption>
+            The direct model (blue) captures complex distribution shapes on IPUMS income data,
+            while the baseline model (orange) collapses to a narrow unimodal residual distribution,
+            missing the true structure.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── Sub-page: Monte Carlo ── -->
+  <div id="options-montecarlo" class="sub-page">
+    <section class="section-padding">
+      <div class="container">
+        <h2>Monte Carlo training</h2>
+        <p class="section-lead">
+          Full grid expansion creates <code>n_samples &times; n_bins</code> rows. Monte Carlo training
+          samples a small number of grid points per sample, dramatically reducing memory usage.
+        </p>
+
+        <div class="comparison">
+          <div>
+            <h4><code>monte_carlo_training=False</code></h4>
+            <p>Each sample is crossed with <em>all</em> grid points. Training set size = n &times; n_bins.</p>
+            <p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
+              100k samples &times; 100 bins = 10M rows
+            </p>
+          </div>
+          <div>
+            <h4><code>monte_carlo_training=True</code> (default)</h4>
+            <p>Each sample gets <code>mc_samples</code> strategically chosen points (exact peak + Gaussian slope + uniform tails).</p>
+            <p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
+              100k samples &times; 5 MC points = 500k rows
+            </p>
+          </div>
+        </div>
+
+        <div class="highlight-box amber">
+          <strong>In practice, Monte Carlo training produces nearly identical distributions</strong>
+          with a fraction of the memory. The importance-weighted sampling scheme ensures the peak
+          region and tails are both well-represented. For most datasets, the default
+          <code>mc_samples=5</code> is sufficient.
+        </div>
+
+<pre><span class="com"># Full grid - higher memory, marginally more stable</span>
+model = DistributionRegressor(monte_carlo_training=<span class="num">False</span>, n_bins=<span class="num">100</span>)
+
+<span class="com"># Monte Carlo (default) - much less memory, nearly identical quality</span>
+model = DistributionRegressor(monte_carlo_training=<span class="num">True</span>, mc_samples=<span class="num">5</span>, n_bins=<span class="num">100</span>)</pre>
+
+        <h3>Side-by-side comparison</h3>
+        <figure class="figure">
+          <img src="img/mc_comparison.png" alt="Monte Carlo vs full grid comparison">
+          <figcaption>
+            Predicted densities using full grid expansion vs. Monte Carlo with K=5
+            on Rossmann test samples. The distributions are nearly indistinguishable.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="container">
+      <p>
+        <a href="https://github.com/guyko81/DistributionRegressor">GitHub</a> &nbsp;&middot;&nbsp;
+        <a href="https://pypi.org/project/distribution-regressor/">PyPI</a> &nbsp;&middot;&nbsp;
+        MIT License
+      </p>
+      <p style="margin-top: 8px;">Gabor Gulyas &copy; 2025</p>
+    </div>
+  </footer>
+</div>
+
+<!-- ══════════════ JAVASCRIPT ══════════════ -->
+<script>
+function showPage(name) {
+  // Hide all pages
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  // Deactivate all nav links
+  document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
+
+  // Show selected page
+  const page = document.getElementById('page-' + name);
+  if (page) {
+    page.classList.add('active');
+    window.scrollTo(0, 0);
+  }
+
+  // Activate matching nav link
+  document.querySelectorAll('.nav-links a').forEach(a => {
+    if (a.getAttribute('onclick') === "showPage('" + name + "')") {
+      a.classList.add('active');
+    }
+  });
+
+  // Update URL hash without scrolling
+  history.replaceState(null, '', '#' + name);
+}
+
+function showSubPage(pageGroup, subName) {
+  // Find the parent page
+  const parentPage = document.getElementById('page-' + pageGroup);
+  if (!parentPage) return;
+
+  // Hide all sub-pages within this page
+  parentPage.querySelectorAll('.sub-page').forEach(sp => sp.classList.remove('active'));
+  // Deactivate all sub-nav links within this page
+  parentPage.querySelectorAll('.sub-nav a').forEach(a => a.classList.remove('active'));
+
+  // Show selected sub-page
+  const subPage = document.getElementById(pageGroup + '-' + subName);
+  if (subPage) {
+    subPage.classList.add('active');
+    window.scrollTo(0, 0);
+  }
+
+  // Activate matching sub-nav link
+  parentPage.querySelectorAll('.sub-nav a').forEach(a => {
+    if (a.getAttribute('onclick') === "showSubPage('" + pageGroup + "', '" + subName + "')") {
+      a.classList.add('active');
+    }
+  });
+
+  // Update URL hash
+  history.replaceState(null, '', '#' + pageGroup + '/' + subName);
+}
+
+// Handle initial hash on page load
+window.addEventListener('DOMContentLoaded', () => {
+  const hash = window.location.hash.slice(1);
+  if (!hash) return;
+
+  const parts = hash.split('/');
+  if (parts[0] && document.getElementById('page-' + parts[0])) {
+    showPage(parts[0]);
+    if (parts[1] && document.getElementById(parts[0] + '-' + parts[1])) {
+      showSubPage(parts[0], parts[1]);
+    }
+  }
+});
+
+// Handle back/forward navigation
+window.addEventListener('hashchange', () => {
+  const hash = window.location.hash.slice(1);
+  if (!hash) return;
+
+  const parts = hash.split('/');
+  if (parts[0] && document.getElementById('page-' + parts[0])) {
+    showPage(parts[0]);
+    if (parts[1] && document.getElementById(parts[0] + '-' + parts[1])) {
+      showSubPage(parts[0], parts[1]);
+    }
+  }
+});
+</script>
+
+</body>
+</html>

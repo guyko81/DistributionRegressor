@@ -40,7 +40,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         - Small sigma: Target looks like a sharp spike (One-Hot).
         - Large sigma: Target looks like a wide bell curve.
 
-    use_base_model : bool, default=True
+    use_base_model : bool, default=False
         If True, trains a base LGBMRegressor for point predictions and builds
         the soft-target model on CV residuals. This anchors point predictions
         to RMSE-optimal estimates and learns the residual distribution.
@@ -73,7 +73,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
         self,
         n_bins=50,
         sigma='auto',
-        use_base_model=True,
+        use_base_model=False,
         n_estimators=100,
         learning_rate=0.1,
         monte_carlo_training=True,
