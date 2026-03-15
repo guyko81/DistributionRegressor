@@ -176,6 +176,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
                 oof_predictions[val_idx] = fold_model.predict(X_df.iloc[val_idx])
 
             target_for_grid = y_array - oof_predictions
+            X_df = X_df.copy()
+            X_df['_base_pred'] = oof_predictions
         else:
             self.base_model_ = None
             target_for_grid = y_array
@@ -276,7 +278,7 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
             sigma_sq = np.repeat(self.sigma_val_, K) ** 2
 
         y_targets_soft = np.exp(-diff_sq / (2 * sigma_sq))
-        y_targets_soft[y_targets_soft < 1e-5] = 0.0
+        # y_targets_soft[y_targets_soft < 1e-5] = 0.0
 
         # 7. Configure and Train LightGBM
         params = {
@@ -320,6 +322,8 @@ class DistributionRegressorSoftTarget(BaseEstimator, RegressorMixin):
 
         if self.base_model_ is not None:
             base_preds = self.base_model_.predict(X_df)
+            X_df = X_df.copy()
+            X_df['_base_pred'] = base_preds
             grids = self._per_sample_grids(base_preds)
         else:
             grids = np.tile(self.grid_, (n_samples, 1))
