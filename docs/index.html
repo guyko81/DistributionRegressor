@@ -314,27 +314,30 @@
       padding: 24px;
     }
 
-    /* ── DIAGRAM ── */
+    /* ── DIAGRAM (2x2 grid with arrows) ── */
     .diagram {
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      grid-template-rows: auto auto auto;
       align-items: center;
-      justify-content: center;
-      gap: 16px;
-      margin: 32px 0;
-      flex-wrap: wrap;
+      justify-items: center;
+      gap: 8px 12px;
+      margin: 32px auto;
+      max-width: 620px;
     }
     .diagram-box {
       background: white;
       border: 2px solid var(--primary);
       border-radius: var(--radius);
-      padding: 20px 28px;
+      padding: 18px 24px;
       text-align: center;
-      min-width: 160px;
+      width: 100%;
       box-shadow: var(--shadow);
     }
     .diagram-box .label { font-weight: 600; color: var(--primary); }
     .diagram-box .sub { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
     .diagram-arrow { font-size: 1.5rem; color: var(--primary); font-weight: 700; }
+    .diagram-arrow-down { font-size: 1.5rem; color: var(--primary); font-weight: 700; grid-column: 3; }
 
     /* ── HIGHLIGHT BOX ── */
     .highlight-box {
@@ -347,6 +350,10 @@
     .highlight-box.amber {
       background: linear-gradient(135deg, #fffbeb, #fef3c7);
       border-left-color: var(--accent);
+    }
+    .highlight-box.green {
+      background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+      border-left-color: #22c55e;
     }
 
     /* ── API METHOD ── */
@@ -397,6 +404,8 @@
       font-size: 0.95rem;
       margin-top: 12px;
     }
+
+    /* ── DEP GRID (Install page) ── */
     .dep-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -473,7 +482,7 @@
 </head>
 <body>
 
-<!-- ══════════════ NAVIGATION ══════════════ -->
+<!-- NAV -->
 <nav>
   <div class="nav-brand">DistributionRegressor</div>
   <div class="nav-links">
@@ -482,7 +491,7 @@
     <a onclick="showPage('guide')">Guide</a>
     <a onclick="showPage('api')">API</a>
     <a onclick="showPage('examples')">Examples</a>
-    <a onclick="showPage('options')">Options</a>
+    <a onclick="showPage('options')">Advanced Options</a>
   </div>
   <div class="nav-right">
     <a href="https://github.com/guyko81/DistributionRegressor">GitHub</a>
@@ -500,7 +509,7 @@
       <div style="flex:1;">
         <h1 style="margin-bottom: 6px;">DistributionRegressor</h1>
         <p class="tagline" style="margin-bottom: 0;">
-          Nonparametric conditional density estimation using LightGBM with soft targets.
+          Nonparametric conditional density estimation using LightGBM with a CDF-based approach.
         </p>
       </div>
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:10px; flex-shrink:0;">
@@ -558,41 +567,45 @@
     <div class="container">
       <h2>How it works</h2>
       <p class="section-lead">
-        The target range is discretized into a grid. For each training sample, a Gaussian kernel centered at the
-        true y value produces soft targets across the grid. The dataset is expanded into (x, grid_point) pairs,
-        and a single LightGBM model is trained with cross-entropy loss to predict the soft target values.
+        The target range is discretized into a grid of threshold points. For each training sample and threshold,
+        a binary target indicates whether the true value falls below that threshold. A single LightGBM model
+        learns the conditional CDF F(&tau;|x) = P(Y &le; &tau; | X = x), with a monotone increasing constraint
+        on the threshold feature to ensure a valid CDF. The PMF is recovered by differencing.
       </p>
       <div class="diagram">
+        <!-- Row 1 -->
         <div class="diagram-box">
           <div class="label">1. Grid</div>
           <div class="sub">Discretize y-range<br>into <code>n_bins</code> points</div>
         </div>
         <div class="diagram-arrow">&rarr;</div>
         <div class="diagram-box">
-          <div class="label">2. Soft Targets</div>
-          <div class="sub">Gaussian kernel<br>around true y<sub>i</sub></div>
+          <div class="label">2. Binary Targets</div>
+          <div class="sub">z<sub>ij</sub> = 1{y<sub>i</sub> &le; &tau;<sub>j</sub>}</div>
         </div>
-        <div class="diagram-arrow">&rarr;</div>
-        <div class="diagram-box">
-          <div class="label">3. Expand</div>
-          <div class="sub">Cross (x<sub>i</sub>, g<sub>j</sub>)<br>pairs + targets</div>
-        </div>
-        <div class="diagram-arrow">&rarr;</div>
+        <!-- Down arrow row -->
+        <div class="diagram-arrow-down">&darr;</div>
+        <!-- Row 2 -->
         <div class="diagram-box">
           <div class="label">4. Train</div>
-          <div class="sub">Single LightGBM<br>cross-entropy loss</div>
+          <div class="sub">Single LightGBM<br>logistic loss + monotone</div>
+        </div>
+        <div class="diagram-arrow">&larr;</div>
+        <div class="diagram-box">
+          <div class="label">3. Expand</div>
+          <div class="sub">Cross (x<sub>i</sub>, &tau;<sub>j</sub>)<br>pairs + binary targets</div>
         </div>
       </div>
       <p>
-        At inference, the model is queried at every grid point for a given x, and the outputs are
-        normalized to form a proper density.
+        At inference, the model predicts F(&tau;|x) for all grid points, then differences the CDF
+        to recover the probability mass function. This produces a full nonparametric distribution
+        for every input - no distributional assumptions required.
       </p>
       <div class="highlight-box" style="margin-top: 28px;">
         <strong>Comparison with NGBoost:</strong> NGBoost uses natural gradient boosting to fit parameters of a
         parametric distribution (e.g., Normal, LogNormal). This package is nonparametric - it learns
         the density shape directly, so it can represent multimodal or irregular distributions without
-        choosing a parametric family. Training is also sometimes even ~100x faster since it fits a single
-        LightGBM model rather than sequential boosting with per-sample Hessian computations.
+        choosing a parametric family.
       </div>
     </div>
   </section>
@@ -694,15 +707,15 @@ pip install -e .</pre>
       <h2>Quick Start</h2>
       <p class="section-lead">
         Install and start predicting distributions in under 10 lines of code.
+        The defaults work well for most problems - just set <code>n_bins</code> and <code>n_estimators</code>.
       </p>
 
 <pre><span class="kw">from</span> distribution_regressor <span class="kw">import</span> DistributionRegressor
 
-<span class="com"># Initialize</span>
+<span class="com"># Initialize with defaults - this is all you need</span>
 model = DistributionRegressor(
     n_bins=<span class="num">50</span>,           <span class="com"># grid resolution</span>
     n_estimators=<span class="num">500</span>,    <span class="com"># LightGBM trees</span>
-    sigma=<span class="str">'auto'</span>,         <span class="com"># automatic kernel width</span>
 )
 
 <span class="com"># Train</span>
@@ -733,6 +746,21 @@ plt.<span class="fn">plot</span>(grids[<span class="num">0</span>], dists[<span 
 plt.<span class="fn">axvline</span>(y_test[<span class="num">0</span>], color=<span class="str">'r'</span>, linestyle=<span class="str">'--'</span>, label=<span class="str">'True Value'</span>)
 plt.<span class="fn">legend</span>()
 plt.<span class="fn">show</span>()</pre>
+
+      <h3>Output smoothing</h3>
+      <p>
+        The raw predicted PMF can appear stepped or jagged at lower <code>n_bins</code> values.
+        Apply Gaussian smoothing to the CDF before deriving outputs for smoother densities.
+        This can be set at construction or changed after training:
+      </p>
+<pre><span class="com"># Set at construction</span>
+model = DistributionRegressor(n_bins=<span class="num">100</span>, output_smoothing=<span class="num">1</span>)
+
+<span class="com"># Or change after training without refitting</span>
+model.<span class="fn">set_output_smoothing</span>(output_smoothing=<span class="num">1.5</span>)
+
+<span class="com"># Preserve discrete mass points (e.g., exact zeros)</span>
+model.<span class="fn">set_output_smoothing</span>(output_smoothing=<span class="num">1</span>, atom_values=<span class="num">0</span>)</pre>
     </div>
   </section>
 
@@ -747,35 +775,76 @@ plt.<span class="fn">show</span>()</pre>
         <tbody>
           <tr>
             <td><code>n_bins</code></td><td>50</td>
-            <td>Grid resolution. Higher = finer distributions but more compute. 50-200 is typical.</td>
-          </tr>
-          <tr>
-            <td><code>sigma</code></td><td><code>'auto'</code></td>
-            <td>Kernel bandwidth for soft targets. <code>'auto'</code> estimates per-sample noise from CV residuals. Float for fixed width.</td>
-          </tr>
-          <tr>
-            <td><code>use_base_model</code></td><td><code>False</code></td>
-            <td>If True, fits an LGBM baseline and models residuals. Can improve RMSE at the cost of distribution shape fidelity.</td>
-          </tr>
-          <tr>
-            <td><code>monte_carlo_training</code></td><td><code>True</code></td>
-            <td>Sample grid points instead of full expansion. Reduces memory ~20x with minimal quality loss.</td>
-          </tr>
-          <tr>
-            <td><code>mc_samples</code></td><td>5</td>
-            <td>Number of grid points per sample in MC mode. 5-10 is usually enough.</td>
+            <td>Number of grid points for the CDF. Controls the resolution of the predicted distribution.
+                Higher values capture finer detail but increase memory proportionally (<code>n_samples &times; n_bins</code> expanded rows).
+                50 is fine for most problems; use 100&ndash;200 for complex or wide-range targets.</td>
           </tr>
           <tr>
             <td><code>n_estimators</code></td><td>100</td>
-            <td>Number of LightGBM boosting iterations.</td>
+            <td>Number of LightGBM boosting iterations. Since the model learns a CDF (a smooth function),
+                it often benefits from more trees than a standard regression model. 500&ndash;1000 with a lower
+                learning rate (0.01&ndash;0.05) typically gives the best results.</td>
           </tr>
           <tr>
             <td><code>learning_rate</code></td><td>0.1</td>
-            <td>Boosting learning rate.</td>
+            <td>Boosting learning rate. Lower values (0.01&ndash;0.05) with more estimators generally produce
+                better-calibrated distributions.</td>
+          </tr>
+          <tr>
+            <td><code>output_smoothing</code></td><td>0</td>
+            <td>Gaussian smoothing sigma (in grid-index units) applied to the predicted CDF before deriving outputs.
+                Produces smoother densities. A value of 1&ndash;2 works well. Can be changed after training
+                via <code>set_output_smoothing()</code> without refitting.</td>
+          </tr>
+          <tr>
+            <td><code>atom_values</code></td><td><code>None</code></td>
+            <td>Discrete mass points whose CDF jumps should be preserved through smoothing.
+                Useful when the target has exact values that appear frequently (e.g., zero for "store closed").
+                Only relevant when <code>output_smoothing &gt; 0</code>.</td>
           </tr>
           <tr>
             <td><code>**kwargs</code></td><td>-</td>
-            <td>Any LightGBM parameter: <code>max_depth</code>, <code>num_leaves</code>, <code>subsample</code>, <code>colsample_bytree</code>, etc.</td>
+            <td>Any LightGBM parameter: <code>max_depth</code>, <code>num_leaves</code>, <code>subsample</code>,
+                <code>colsample_bytree</code>, <code>min_child_samples</code>, etc. These are passed directly
+                to the underlying <code>LGBMRegressor</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="highlight-box green" style="margin-top: 24px;">
+        <strong>Recommended starting point:</strong>
+        <code>DistributionRegressor(n_bins=100, n_estimators=1000, learning_rate=0.01)</code>
+        works well across a wide range of problems. Increase <code>n_bins</code> for targets with very wide ranges
+        or fine structure. Adjust LightGBM parameters (<code>num_leaves</code>, <code>subsample</code>) as you would
+        for any gradient boosting model.
+      </div>
+
+      <h3 style="margin-top: 40px;">Advanced options</h3>
+      <p style="color: var(--text-muted); margin-bottom: 16px;">
+        These options are available for specific use cases but are not needed for most problems.
+        See the <a href="#" onclick="showPage('options'); return false;">Advanced Options</a> page for details.
+      </p>
+
+      <table>
+        <thead>
+          <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>use_base_model</code></td><td><code>False</code></td>
+            <td>If True, first trains a base LightGBM regressor, then models the <em>residual</em> distribution.
+                Can improve RMSE but may obscure multimodal structure. Not needed for most use cases.</td>
+          </tr>
+          <tr>
+            <td><code>monte_carlo_training</code></td><td><code>False</code></td>
+            <td>If True, samples a small number of grid points per training sample instead of using the full grid.
+                Reduces memory from <code>n &times; n_bins</code> to <code>n &times; mc_samples</code>.
+                This is an approximation - use only when memory is a constraint.</td>
+          </tr>
+          <tr>
+            <td><code>mc_samples</code></td><td>5</td>
+            <td>Number of grid points per sample when <code>monte_carlo_training=True</code>. Higher values (e.g., 20)
+                give better approximations. Always a quality trade-off vs. full grid.</td>
           </tr>
         </tbody>
       </table>
@@ -806,62 +875,92 @@ plt.<span class="fn">show</span>()</pre>
 
       <h3>Constructor</h3>
 <pre>DistributionRegressor(
-    n_bins=<span class="num">50</span>,                <span class="com"># grid resolution (higher = finer distributions)</span>
-    sigma=<span class="str">'auto'</span>,              <span class="com"># kernel bandwidth: 'auto' or float</span>
-    use_base_model=<span class="num">False</span>,     <span class="com"># anchor to LGBM point predictions</span>
-    monte_carlo_training=<span class="num">True</span>,<span class="com"># memory-efficient MC sampling</span>
-    mc_samples=<span class="num">5</span>,             <span class="com"># MC points per sample</span>
+    n_bins=<span class="num">50</span>,                 <span class="com"># grid resolution (higher = finer distributions)</span>
     n_estimators=<span class="num">100</span>,         <span class="com"># LightGBM trees</span>
     learning_rate=<span class="num">0.1</span>,        <span class="com"># boosting learning rate</span>
+    output_smoothing=<span class="num">0</span>,       <span class="com"># Gaussian smoothing on CDF (0 = off)</span>
+    atom_values=<span class="num">None</span>,         <span class="com"># preserve discrete mass points through smoothing</span>
+    random_state=<span class="num">None</span>,        <span class="com"># random seed</span>
+    use_base_model=<span class="num">False</span>,     <span class="com"># advanced: learn residual distribution</span>
+    monte_carlo_training=<span class="num">False</span>,<span class="com"># advanced: memory-efficient MC sampling</span>
+    mc_samples=<span class="num">5</span>,             <span class="com"># advanced: MC points per sample</span>
     **kwargs                  <span class="com"># passed to LGBMRegressor</span>
 )</pre>
 
-      <h3>Prediction Methods</h3>
+      <h3>Training</h3>
+      <div class="api-method">
+        <div class="signature">model.fit(X, y, sample_weight=None)</div>
+        <div class="desc">Fit the model by learning F(&tau;|x) = P(Y &le; &tau; | X = x).
+          <code>X</code> can be a NumPy array or Pandas DataFrame. <code>sample_weight</code> applies per-sample
+          weights to the expanded training set.</div>
+      </div>
+
+      <h3>Point Predictions</h3>
       <div class="api-method">
         <div class="signature">model.predict(X) / model.predict_mean(X)</div>
-        <div class="desc">Expected value E[Y|X]. When <code>use_base_model=True</code>, returns the base LGBM prediction directly.</div>
+        <div class="desc">Expected value E[Y|X] = &sum; grid &times; pmf. This is the distributional mean, computed from the full predicted PMF.</div>
       </div>
       <div class="api-method">
         <div class="signature">model.predict_mode(X)</div>
-        <div class="desc">Most likely value (peak of the predicted density).</div>
+        <div class="desc">Most likely value (peak of the predicted density). Useful for multimodal distributions where the mean may fall between modes.</div>
       </div>
       <div class="api-method">
         <div class="signature">model.predict_quantile(X, q=0.5)</div>
-        <div class="desc">Arbitrary quantile(s). Pass a list for multiple quantiles at once.</div>
+        <div class="desc">Arbitrary quantile(s) via CDF inversion. Pass a scalar for a single quantile, or a list/array for multiple
+          (e.g., <code>q=[0.1, 0.5, 0.9]</code>). Returns shape <code>(n_samples,)</code> or <code>(n_samples, n_quantiles)</code>.</div>
       </div>
       <div class="api-method">
         <div class="signature">model.predict_interval(X, confidence=0.95)</div>
-        <div class="desc">Symmetric prediction interval [lower, upper].</div>
+        <div class="desc">Symmetric prediction interval [lower, upper]. Returns shape <code>(n_samples, 2)</code>.
+          A <code>confidence=0.9</code> gives the 5th&ndash;95th percentile interval.</div>
       </div>
       <div class="api-method">
         <div class="signature">model.predict_std(X)</div>
-        <div class="desc">Standard deviation of the predicted distribution.</div>
+        <div class="desc">Standard deviation of the predicted distribution: &radic;(E[Y&sup2;|X] - E[Y|X]&sup2;).</div>
       </div>
+
+      <h3>Full Distribution</h3>
       <div class="api-method">
         <div class="signature">model.predict_distribution(X)</div>
-        <div class="desc">Full distribution: returns (grids, distributions, base_offsets).</div>
+        <div class="desc">Returns <code>(grids, distributions, base_offsets)</code>:
+          <ul style="margin-top: 6px; padding-left: 20px; font-size: 0.9rem;">
+            <li><code>grids</code>: <code>(n_samples, n_bins)</code> - per-sample grid points in absolute y-space</li>
+            <li><code>distributions</code>: <code>(n_samples, n_bins)</code> - probability mass (sums to 1 per row)</li>
+            <li><code>base_offsets</code>: <code>(n_samples,)</code> - base model predictions (zeros when <code>use_base_model=False</code>)</li>
+          </ul>
+        </div>
       </div>
 
       <h3>Density Evaluation</h3>
       <div class="api-method">
-        <div class="signature">model.pdf(X, y)</div>
-        <div class="desc">Evaluate predicted density f(y|X) at specific y values.</div>
+        <div class="signature">model.pdf(X, y, eps=1e-10)</div>
+        <div class="desc">Evaluate predicted density f(y|X) at specific y values via linear interpolation on the PMF grid.
+          Returns <code>eps</code> for y values outside the grid support.</div>
       </div>
       <div class="api-method">
-        <div class="signature">model.logpdf(X, y)</div>
-        <div class="desc">Log-density log f(y|X).</div>
+        <div class="signature">model.logpdf(X, y, eps=1e-10)</div>
+        <div class="desc">Log-density log f(y|X). Equivalent to <code>np.log(model.pdf(X, y, eps))</code>.</div>
       </div>
       <div class="api-method">
         <div class="signature">model.cdf(X, y)</div>
-        <div class="desc">Cumulative distribution P(Y &le; y | X).</div>
+        <div class="desc">Cumulative distribution F(y|X) = P(Y &le; y | X). Returns 0 below grid support, 1 above.</div>
       </div>
       <div class="api-method">
-        <div class="signature">model.ppf(X, q)</div>
-        <div class="desc">Inverse CDF / percent point function.</div>
+        <div class="signature">model.ppf(X, q=0.5)</div>
+        <div class="desc">Percent point function (inverse CDF / quantile function). Alias for <code>predict_quantile</code>.</div>
       </div>
       <div class="api-method">
-        <div class="signature">model.nll(X, y)</div>
-        <div class="desc">Mean negative log-likelihood - a proper scoring rule for density evaluation.</div>
+        <div class="signature">model.nll(X, y, eps=1e-10)</div>
+        <div class="desc">Mean negative log-likelihood - a proper scoring rule for density evaluation.
+          Lower is better. Useful for model comparison and hyperparameter tuning.</div>
+      </div>
+
+      <h3>Post-Training Configuration</h3>
+      <div class="api-method">
+        <div class="signature">model.set_output_smoothing(output_smoothing=0, atom_values=None)</div>
+        <div class="desc">Change CDF smoothing after training without refitting. Affects all subsequent predictions.
+          <code>output_smoothing</code> is the Gaussian sigma in grid-index units.
+          <code>atom_values</code> specifies discrete mass points whose CDF jumps are preserved through smoothing.</div>
       </div>
     </div>
   </section>
@@ -900,7 +999,7 @@ plt.<span class="fn">show</span>()</pre>
     <a onclick="showSubPage('examples', 'ipums')">IPUMS Income (vs NGBoost)</a>
   </div>
 
-  <!-- ── Sub-page: Rossmann ── -->
+  <!-- Sub-page: Rossmann -->
   <div id="examples-rossmann" class="sub-page active">
     <section class="section-padding">
       <div class="container">
@@ -910,19 +1009,11 @@ plt.<span class="fn">show</span>()</pre>
           promotional effects, and holiday uncertainty - including the hard zero on Sundays.
         </p>
 
-        <p>
-          While the default is <code>use_base_model=False</code>, this is a case where enabling the base model
-          is beneficial. Retail sales for a single store are unimodal and well-behaved - the base model
-          anchors point predictions tightly, and the residual distribution captures the remaining uncertainty
-          with narrow, well-calibrated intervals.
-        </p>
-
 <pre><span class="kw">from</span> distribution_regressor <span class="kw">import</span> DistributionRegressor
 
 model = DistributionRegressor(
     n_bins=<span class="num">100</span>, n_estimators=<span class="num">1000</span>, learning_rate=<span class="num">0.01</span>,
-    sigma=<span class="str">'auto'</span>, random_state=<span class="num">42</span>,
-    use_base_model=<span class="num">True</span>,  <span class="com"># beneficial here: unimodal, narrow uncertainty</span>
+    random_state=<span class="num">42</span>,
 )
 model.<span class="fn">fit</span>(train_data[features], train_data[<span class="str">'Sales'</span>])
 
@@ -936,16 +1027,17 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
           <img src="img/rossmann_timeseries.png" alt="Rossmann sales time series with uncertainty bands">
           <figcaption>
             Predicted sales distribution for the test period (last 5 weeks). Blue = actual sales,
-            red bands = 10th-90th and 25th-75th percentile intervals.
-            The base model anchors predictions tightly, producing narrow uncertainty bands.
-            Sundays (dips to zero) are captured cleanly.
+            red bands = 10th&ndash;90th and 25th&ndash;75th percentile intervals.
+            Sundays (dips to zero) are captured cleanly. The model naturally produces wider
+            uncertainty bands for promotional days and tighter bands for regular patterns.
           </figcaption>
         </figure>
 
         <h3>Individual distribution shapes</h3>
         <p>
-          With <code>use_base_model=True</code>, the per-sample adaptive grid centers on the base prediction,
-          giving high resolution where it matters. The closed-day prediction collapses to a tight spike at zero:
+          Each sample gets a full predicted density. The closed-day prediction collapses to a tight
+          spike at zero, while open days show the characteristic sales distribution with appropriate
+          spread depending on context (promo vs. normal weekday):
         </p>
 
         <figure class="figure">
@@ -953,13 +1045,14 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
           <figcaption>
             Predicted p(Sales|x) for selected test days. The closed day shows a sharp spike at zero.
             Promo days have slightly wider spreads, while regular weekdays are tighter.
+            Red dashed line = actual sales value.
           </figcaption>
         </figure>
       </div>
     </section>
   </div>
 
-  <!-- ── Sub-page: IPUMS ── -->
+  <!-- Sub-page: IPUMS -->
   <div id="examples-ipums" class="sub-page">
     <section class="section-padding">
       <div class="container">
@@ -972,28 +1065,26 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
         <h3>Benchmark results</h3>
         <table>
           <thead>
-            <tr><th>Method</th><th>Test NLL</th><th>Weighted NLL</th><th>Training Time</th></tr>
+            <tr><th>Method</th><th>Test NLL</th><th>Weighted NLL</th></tr>
           </thead>
           <tbody>
             <tr>
               <td><strong>DistributionRegressor</strong></td>
-              <td>11.30</td>
-              <td>11.32</td>
-              <td><strong>5 s</strong></td>
+              <td>11.19</td>
+              <td>11.21</td>
             </tr>
             <tr>
               <td>NGBoost (LogNormal)</td>
               <td><strong>11.11</strong></td>
-              <td><strong>11.15</strong></td>
-              <td>363 s</td>
+              <td><strong>11.14</strong></td>
             </tr>
           </tbody>
         </table>
 
         <div class="highlight-box">
-          <strong>Key takeaway:</strong> DistributionRegressor achieves competitive NLL within 0.2 nats of NGBoost,
-          while training <strong>~70x faster</strong> and without requiring any distributional assumptions.
-          NGBoost wins on NLL here because income is approximately log-normal and it uses the matching LogNormal
+          <strong>Key takeaway:</strong> DistributionRegressor achieves NLL within 0.08 nats of NGBoost
+          without requiring any distributional assumptions.
+          NGBoost edges ahead on NLL here because income is approximately log-normal and it uses the matching LogNormal
           parametric family - a strong inductive bias when it happens to match the true distribution.
         </div>
 
@@ -1033,134 +1124,349 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════
-     PAGE 6: OPTIONS (with sub-tabs)
+     PAGE 6: ADVANCED OPTIONS (with sub-tabs)
      ══════════════════════════════════════════════════════════════════ -->
 <div id="page-options" class="page">
 
   <div class="sub-nav" id="options-sub-nav">
     <a class="active" onclick="showSubPage('options', 'baseline')">Base Model</a>
     <a onclick="showSubPage('options', 'montecarlo')">Monte Carlo Training</a>
+    <a onclick="showSubPage('options', 'tuning')">Tuning Guide</a>
   </div>
 
-  <!-- ── Sub-page: Base Model ── -->
+  <!-- Sub-page: Base Model -->
   <div id="options-baseline" class="sub-page active">
     <section class="section-padding">
       <div class="container">
-        <h2>With and without base model</h2>
+        <h2>Base Model (<code>use_base_model</code>)</h2>
+
+        <div class="highlight-box amber">
+          <strong>Most users do not need this option.</strong>
+          The default direct mode (<code>use_base_model=False</code>) learns the full conditional distribution
+          end-to-end and works well for the vast majority of problems.
+          The base model option exists for specific scenarios described below.
+        </div>
+
         <p class="section-lead">
-          The <code>use_base_model</code> option controls whether DistributionRegressor learns
-          distributions directly on the target, or on residuals from a preliminary LightGBM fit.
+          When <code>use_base_model=True</code>, the model first trains a standard LightGBM regressor for
+          point predictions, computes out-of-fold residuals, and then learns the <em>residual</em> CDF
+          rather than the raw target CDF. This means the distributional model only needs to capture
+          the uncertainty <em>around</em> the point prediction rather than the full target range.
         </p>
 
+        <h3>How it works</h3>
+        <div class="diagram">
+          <!-- Row 1 -->
+          <div class="diagram-box">
+            <div class="label">1. Base Model</div>
+            <div class="sub">Train LGBM regressor<br>on full target y</div>
+          </div>
+          <div class="diagram-arrow">&rarr;</div>
+          <div class="diagram-box">
+            <div class="label">2. OOF Residuals</div>
+            <div class="sub">5-fold CV residuals<br>r = y - y&#770;</div>
+          </div>
+          <!-- Down arrow row -->
+          <div class="diagram-arrow-down">&darr;</div>
+          <!-- Row 2 -->
+          <div class="diagram-box">
+            <div class="label">4. Shift Back</div>
+            <div class="sub">grids + base_pred<br>= absolute distribution</div>
+          </div>
+          <div class="diagram-arrow">&larr;</div>
+          <div class="diagram-box">
+            <div class="label">3. CDF on Residuals</div>
+            <div class="sub">Learn F(&tau;|x) on r<br>with per-sample grids</div>
+          </div>
+        </div>
+
+        <h3>When to consider it</h3>
         <div class="comparison">
           <div>
             <h4><code>use_base_model=False</code> (default)</h4>
-            <p>The soft-target model learns p(y|x) directly on the raw target variable.</p>
+            <p>The CDF model learns p(y|x) directly. This is the recommended approach.</p>
             <ul style="margin-top: 12px; padding-left: 20px; color: var(--text-muted); font-size: 0.95rem;">
               <li>Simpler - single model, no residual computation</li>
-              <li>Preserves multimodal structure in the data</li>
+              <li>Preserves multimodal and complex distribution shapes</li>
               <li>Cleaner theoretical foundation</li>
-              <li>Recommended for most use cases</li>
+              <li>Works well across all distribution types</li>
+              <li>Already produces good point predictions (mean, quantiles)</li>
             </ul>
           </div>
           <div>
             <h4><code>use_base_model=True</code></h4>
-            <p>First fits a standard LightGBM for point predictions, then models the <em>residual distribution</em> with soft targets.</p>
+            <p>First fits a standard LightGBM for point predictions, then models the <em>residual distribution</em>.</p>
             <ul style="margin-top: 12px; padding-left: 20px; color: var(--text-muted); font-size: 0.95rem;">
-              <li>Can improve point prediction (lower RMSE)</li>
+              <li>May marginally improve RMSE on unimodal, well-behaved targets</li>
               <li>Per-sample adaptive grid centered on base prediction</li>
-              <li>Higher resolution in the likely region</li>
-              <li>Useful when RMSE performance is critical</li>
+              <li>Higher grid resolution in the likely region</li>
+              <li><strong>Trade-off:</strong> can obscure multimodal structure in the data</li>
+              <li><strong>Trade-off:</strong> adds training complexity (5-fold CV + 2 models)</li>
             </ul>
           </div>
         </div>
 
-<pre><span class="com"># Without baseline (default) - learn full distribution directly</span>
-model_direct = DistributionRegressor(use_base_model=<span class="num">False</span>)
-model_direct.<span class="fn">fit</span>(X_train, y_train)
+        <h3>The trade-off</h3>
+        <p>
+          The base model approach learns a residual distribution centered near zero, which means
+          the CDF model focuses its capacity on the uncertainty around the point prediction rather
+          than the full target range. This can improve RMSE slightly, but adds complexity (5-fold CV
+          + two models) and may introduce subtle shifts or smoothing in the predicted distribution shape.
+        </p>
+        <p style="margin-top: 12px;">
+          In practice, the direct model (<code>use_base_model=False</code>) produces distributions that are
+          precise enough for both point prediction and uncertainty quantification. The base model option
+          adds complexity for a marginal RMSE gain that is rarely worth the trade-off.
+        </p>
 
-<span class="com"># With baseline - learn residual distribution around point prediction</span>
-model_baseline = DistributionRegressor(use_base_model=<span class="num">True</span>)
-model_baseline.<span class="fn">fit</span>(X_train, y_train)</pre>
-
-        <h3>Calibration and RMSE</h3>
+        <h3>Calibration and RMSE comparison</h3>
         <figure class="figure">
           <img src="img/baseline_comparison.png" alt="Calibration comparison with and without base model">
           <figcaption>
             Calibration plot and RMSE comparison on Rossmann test set.
-            The baseline model offers better RMSE but both modes show comparable calibration.
+            Both modes show comparable calibration. The baseline model offers slightly better RMSE
+            on this unimodal dataset, but the difference is marginal.
           </figcaption>
         </figure>
 
-        <h3>Trade-off: RMSE vs. distribution shape</h3>
+        <h3>Distribution shape on multimodal data</h3>
         <p>
-          While <code>use_base_model=True</code> often delivers better RMSE and can be better calibrated,
-          it models the <em>residual</em> distribution. This means the model learns a narrow, roughly
-          symmetric distribution centered near zero - which can obscure multimodal structure present in the
-          raw target. In cases where the conditional distribution has multiple modes, the direct model
-          (<code>use_base_model=False</code>) preserves this structure.
+          On IPUMS income data - where conditional distributions can be multimodal - both modes
+          capture the overall shape, but the baseline model can shift or smooth out fine structure
+          due to the residual centering:
         </p>
 
         <figure class="figure">
-          <img src="img/baseline_multimodal.png" alt="Baseline mode losing multimodal structure">
+          <img src="img/baseline_multimodal.png" alt="Direct vs baseline on multimodal data">
           <figcaption>
-            The direct model (blue) captures complex distribution shapes on IPUMS income data,
-            while the baseline model (orange) collapses to a narrow unimodal residual distribution,
-            missing the true structure.
+            Direct model (blue) vs. baseline model (orange dashed) on IPUMS income data.
+            Both capture the overall distribution shape, but the baseline model can introduce
+            subtle shifts and smoothing artifacts from the residual transformation.
+          </figcaption>
+        </figure>
+
+<pre><span class="com"># Only use base model when you specifically need it</span>
+model = DistributionRegressor(
+    use_base_model=<span class="num">True</span>,
+    n_bins=<span class="num">100</span>, n_estimators=<span class="num">1000</span>, learning_rate=<span class="num">0.01</span>,
+)</pre>
+      </div>
+    </section>
+  </div>
+
+  <!-- Sub-page: Monte Carlo -->
+  <div id="options-montecarlo" class="sub-page">
+    <section class="section-padding">
+      <div class="container">
+        <h2>Monte Carlo Training (<code>monte_carlo_training</code>)</h2>
+
+        <div class="highlight-box amber">
+          <strong>Monte Carlo training is an approximation.</strong>
+          Full grid training (the default) gives the highest quality results. Monte Carlo training
+          reduces memory usage significantly but produces noticeably different distributions.
+          Use it only when memory is a binding constraint.
+        </div>
+
+        <p class="section-lead">
+          By default, the training set is expanded to <code>n_samples &times; n_bins</code> rows: every sample is
+          paired with every grid point. Monte Carlo training instead samples a small number of grid points per
+          sample, reducing the expanded dataset size dramatically - at the cost of distribution quality.
+        </p>
+
+        <h3>How it works</h3>
+        <p>
+          For each training sample, Monte Carlo mode selects <code>mc_samples</code> threshold points:
+        </p>
+        <ul style="padding-left: 20px; color: var(--text-muted); margin: 12px 0;">
+          <li><strong>Point 0:</strong> The exact target value y<sub>i</sub> (the CDF transition point)</li>
+          <li><strong>Points 1&ndash;K:</strong> Uniformly sampled from the grid range</li>
+        </ul>
+        <p>
+          Because each sample only sees K grid points instead of all <code>n_bins</code>, the model receives
+          a sparser training signal. The overall shape is preserved, but fine details of the distribution
+          - peak height, tail behavior, sharpness - can differ from the full grid result.
+        </p>
+
+        <h3>Memory comparison</h3>
+        <div class="comparison">
+          <div>
+            <h4><code>monte_carlo_training=False</code> (default)</h4>
+            <p>Each sample is crossed with <em>all</em> grid points. Best quality.</p>
+            <p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
+              100k samples &times; 100 bins = <strong>10M rows</strong>
+            </p>
+            <p style="margin-top: 4px; font-size: 0.9rem; color: var(--text-muted);">
+              1M samples &times; 200 bins = <strong>200M rows</strong> (may exceed RAM)
+            </p>
+          </div>
+          <div>
+            <h4><code>monte_carlo_training=True</code></h4>
+            <p>Each sample gets <code>mc_samples</code> sampled points. Approximate.</p>
+            <p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
+              100k samples &times; 20 MC points = <strong>2M rows</strong>
+            </p>
+            <p style="margin-top: 4px; font-size: 0.9rem; color: var(--text-muted);">
+              1M samples &times; 20 MC points = <strong>20M rows</strong> (manageable)
+            </p>
+          </div>
+        </div>
+
+        <h3>When to use it</h3>
+        <p>
+          Use Monte Carlo training only when the full grid expansion would exceed your available memory.
+          This typically happens with very large training sets (100k+ samples) combined with
+          high <code>n_bins</code> (100+). For small to medium datasets, full grid training is fast,
+          fits easily in memory, and should always be preferred.
+        </p>
+        <p style="margin-top: 12px;">
+          Higher <code>mc_samples</code> values (e.g., 20) give better approximations at the cost of more memory.
+          There is always a quality trade-off - if memory allows, use the full grid.
+        </p>
+
+<pre><span class="com"># Full grid (default) - always prefer this when memory allows</span>
+model = DistributionRegressor(n_bins=<span class="num">100</span>)
+
+<span class="com"># Monte Carlo - approximate, for large datasets where memory is tight</span>
+model = DistributionRegressor(
+    monte_carlo_training=<span class="num">True</span>,
+    mc_samples=<span class="num">20</span>,
+    n_bins=<span class="num">100</span>,
+)</pre>
+
+        <h3>Quality comparison</h3>
+        <p>
+          Monte Carlo training preserves the overall distribution shape but differs in detail
+          from the full grid result. The chart below also shows the effect of combining
+          <code>use_base_model=True</code> with MC training, which produces narrower, shifted distributions:
+        </p>
+
+        <figure class="figure">
+          <img src="img/mc_comparison.png" alt="Full grid vs MC vs Base+MC comparison">
+          <figcaption>
+            Predicted densities on Rossmann test samples. Blue = full grid (reference),
+            orange dashed = MC with K=20 (approximate), green dotted = base model + MC with K=20
+            (narrower, shifted). MC training is a useful approximation when memory is constrained,
+            but full grid training should be preferred when feasible.
           </figcaption>
         </figure>
       </div>
     </section>
   </div>
 
-  <!-- ── Sub-page: Monte Carlo ── -->
-  <div id="options-montecarlo" class="sub-page">
+  <!-- Sub-page: Tuning Guide -->
+  <div id="options-tuning" class="sub-page">
     <section class="section-padding">
       <div class="container">
-        <h2>Monte Carlo training</h2>
+        <h2>Tuning Guide</h2>
         <p class="section-lead">
-          Full grid expansion creates <code>n_samples &times; n_bins</code> rows. Monte Carlo training
-          samples a small number of grid points per sample, dramatically reducing memory usage.
+          Practical guidance for getting the best results from DistributionRegressor.
         </p>
 
-        <div class="comparison">
-          <div>
-            <h4><code>monte_carlo_training=False</code></h4>
-            <p>Each sample is crossed with <em>all</em> grid points. Training set size = n &times; n_bins.</p>
-            <p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
-              100k samples &times; 100 bins = 10M rows
-            </p>
-          </div>
-          <div>
-            <h4><code>monte_carlo_training=True</code> (default)</h4>
-            <p>Each sample gets <code>mc_samples</code> strategically chosen points (exact peak + Gaussian slope + uniform tails).</p>
-            <p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
-              100k samples &times; 5 MC points = 500k rows
-            </p>
-          </div>
+        <h3>Step 1: Start with good defaults</h3>
+        <p>
+          For most problems, the following configuration works well out of the box:
+        </p>
+<pre>model = DistributionRegressor(
+    n_bins=<span class="num">100</span>,
+    n_estimators=<span class="num">1000</span>,
+    learning_rate=<span class="num">0.01</span>,
+    random_state=<span class="num">42</span>,
+)</pre>
+
+        <h3>Step 2: Adjust <code>n_bins</code> for your target range</h3>
+        <p>
+          <code>n_bins</code> controls the resolution of the predicted distribution. Think of it as the
+          number of "buckets" the model uses to represent the density.
+        </p>
+        <table>
+          <thead>
+            <tr><th>Scenario</th><th>Recommended <code>n_bins</code></th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Narrow, well-behaved targets (temperature, standardized scores)</td>
+              <td>50</td>
+            </tr>
+            <tr>
+              <td>Moderate range (retail sales, housing prices)</td>
+              <td>100</td>
+            </tr>
+            <tr>
+              <td>Wide range or fine structure (income, medical costs)</td>
+              <td>150&ndash;200</td>
+            </tr>
+            <tr>
+              <td>Very wide or heavy-tailed (insurance claims, financial)</td>
+              <td>200+ (consider log-transforming the target first)</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin-top: 12px; color: var(--text-muted); font-size: 0.95rem;">
+          Higher <code>n_bins</code> gives finer resolution but increases memory linearly.
+          If memory is tight, combine higher <code>n_bins</code> with <code>monte_carlo_training=True</code>,
+          but note this is an approximation (see <a href="#" onclick="showSubPage('options', 'montecarlo'); return false;">Monte Carlo Training</a>).
+        </p>
+
+        <h3>Step 3: Tune the LightGBM parameters</h3>
+        <p>
+          Since DistributionRegressor uses LightGBM under the hood, all standard LGBM tuning strategies apply.
+          Pass any parameter through <code>**kwargs</code>:
+        </p>
+<pre>model = DistributionRegressor(
+    n_bins=<span class="num">100</span>,
+    n_estimators=<span class="num">1000</span>,
+    learning_rate=<span class="num">0.01</span>,
+    <span class="com"># Standard LightGBM parameters</span>
+    num_leaves=<span class="num">63</span>,
+    max_depth=<span class="num">-1</span>,
+    subsample=<span class="num">0.8</span>,
+    colsample_bytree=<span class="num">0.8</span>,
+    min_child_samples=<span class="num">20</span>,
+)</pre>
+
+        <h3>Step 4: Evaluate with proper scoring rules</h3>
+        <p>
+          Use <strong>negative log-likelihood (NLL)</strong> as your primary evaluation metric for the distribution
+          quality. Lower NLL means better-calibrated, sharper distributions. Use RMSE or MAE alongside NLL
+          to evaluate point prediction quality:
+        </p>
+<pre><span class="com"># Distribution quality (proper scoring rule)</span>
+nll = model.<span class="fn">nll</span>(X_test, y_test)
+
+<span class="com"># Point prediction quality</span>
+<span class="kw">from</span> sklearn.metrics <span class="kw">import</span> mean_squared_error
+rmse = mean_squared_error(y_test, model.<span class="fn">predict</span>(X_test), squared=<span class="num">False</span>)
+
+<span class="com"># Calibration check: does 90% interval contain ~90% of true values?</span>
+iv = model.<span class="fn">predict_interval</span>(X_test, confidence=<span class="num">0.9</span>)
+coverage = ((y_test >= iv[:, <span class="num">0</span>]) & (y_test <= iv[:, <span class="num">1</span>])).<span class="fn">mean</span>()
+<span class="fn">print</span>(<span class="str">f"90% interval coverage: </span>{coverage:<span class="num">.1%</span>}<span class="str">"</span>)</pre>
+
+        <h3>Step 5: Apply output smoothing if needed</h3>
+        <p>
+          If the predicted densities look too jagged (especially at lower <code>n_bins</code>), apply
+          Gaussian smoothing. You can experiment with this after training without refitting:
+        </p>
+<pre><span class="com"># Try different smoothing levels</span>
+<span class="kw">for</span> sigma <span class="kw">in</span> [<span class="num">0</span>, <span class="num">0.5</span>, <span class="num">1</span>, <span class="num">2</span>]:
+    model.<span class="fn">set_output_smoothing</span>(sigma)
+    nll = model.<span class="fn">nll</span>(X_test, y_test)
+    <span class="fn">print</span>(<span class="str">f"sigma={sigma}: NLL={nll:.4f}"</span>)
+
+<span class="com"># If target has discrete atoms (e.g., exact zeros), preserve them</span>
+model.<span class="fn">set_output_smoothing</span>(output_smoothing=<span class="num">1</span>, atom_values=<span class="num">0</span>)</pre>
+
+        <div class="highlight-box" style="margin-top: 32px;">
+          <strong>Common pitfalls:</strong>
+          <ul style="padding-left: 20px; margin-top: 8px;">
+            <li><strong>Too few bins:</strong> If <code>n_bins</code> is much smaller than the effective range of your target,
+                the predicted distribution will be coarse. Increase <code>n_bins</code> or transform the target.</li>
+            <li><strong>Too few estimators:</strong> CDF learning benefits from many small steps. If distributions look
+                underfit (too uniform or too wide), increase <code>n_estimators</code> or reduce <code>learning_rate</code>.</li>
+            <li><strong>Outliers:</strong> Extreme outliers stretch the grid range, wasting resolution. Consider
+                clipping or transforming the target before fitting.</li>
+          </ul>
         </div>
-
-        <div class="highlight-box amber">
-          <strong>In practice, Monte Carlo training produces nearly identical distributions</strong>
-          with a fraction of the memory. The importance-weighted sampling scheme ensures the peak
-          region and tails are both well-represented. For most datasets, the default
-          <code>mc_samples=5</code> is sufficient.
-        </div>
-
-<pre><span class="com"># Full grid - higher memory, marginally more stable</span>
-model = DistributionRegressor(monte_carlo_training=<span class="num">False</span>, n_bins=<span class="num">100</span>)
-
-<span class="com"># Monte Carlo (default) - much less memory, nearly identical quality</span>
-model = DistributionRegressor(monte_carlo_training=<span class="num">True</span>, mc_samples=<span class="num">5</span>, n_bins=<span class="num">100</span>)</pre>
-
-        <h3>Side-by-side comparison</h3>
-        <figure class="figure">
-          <img src="img/mc_comparison.png" alt="Monte Carlo vs full grid comparison">
-          <figcaption>
-            Predicted densities using full grid expansion vs. Monte Carlo with K=5
-            on Rossmann test samples. The distributions are nearly indistinguishable.
-          </figcaption>
-        </figure>
       </div>
     </section>
   </div>
@@ -1177,7 +1483,7 @@ model = DistributionRegressor(monte_carlo_training=<span class="num">True</span>
   </footer>
 </div>
 
-<!-- ══════════════ JAVASCRIPT ══════════════ -->
+<!-- JAVASCRIPT -->
 <script>
 function copyCmd(btn, text) {
   navigator.clipboard.writeText(text).then(function() {

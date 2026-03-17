@@ -20,7 +20,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 print("=" * 60)
-print("Training DistributionRegressor (Soft Target)")
+print("Training DistributionRegressor (CDF-based)")
 print("=" * 60)
 
 # Create and train model
@@ -28,8 +28,6 @@ model = DistributionRegressor(
     n_bins=50,              # Resolution of the distribution
     n_estimators=200,       # Number of trees
     learning_rate=0.1,
-    sigma='auto',           # Automatic noise estimation
-    output_smoothing=1.0,   # Smooth the output distribution
     random_state=42
 )
 
@@ -60,8 +58,8 @@ print(f"\nMean Predicted Std Dev: {stds.mean():.3f}")
 
 # Full Distribution
 print(f"\nPredicting full distribution for first sample...")
-grid, dists = model.predict_distribution(X_test[:1])
-print(f"Grid shape: {grid.shape}")
+grids, dists, offsets = model.predict_distribution(X_test[:1])
+print(f"Grid shape: {grids.shape}")
 print(f"Distribution shape: {dists.shape}")
 
 print("\n" + "=" * 60)

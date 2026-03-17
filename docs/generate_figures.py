@@ -155,6 +155,8 @@ def fig_rossmann_densities(model, test, features, target):
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
 
+    model.set_output_smoothing(output_smoothing=1, atom_values=0)
+
     for ax, idx in zip(axes.flat, sample_indices):
         row = test.loc[[idx]]
         grids, dists, offsets = model.predict_distribution(row[features])
@@ -180,7 +182,9 @@ def fig_rossmann_densities(model, test, features, target):
         ax.set_ylabel('Density')
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{x:,.0f}'))
 
-    plt.suptitle('Predicted p(Sales | x) for Selected Test Days (use_base_model=True)', fontsize=14, y=1.01)
+    model.set_output_smoothing(output_smoothing=0)
+
+    plt.suptitle('Predicted p(Sales | x) for Selected Test Days', fontsize=14, y=1.01)
     plt.tight_layout()
     plt.savefig(os.path.join(IMG_DIR, 'rossmann_densities.png'), dpi=150, bbox_inches='tight')
     plt.close()
@@ -221,6 +225,8 @@ def fig_ipums_ngboost():
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
 
+    dr.set_output_smoothing(output_smoothing=1, atom_values=0)
+
     for ax, idx in zip(axes.flat, sample_idx):
         X_i = X_test[idx:idx+1]
         true_y = y_test[idx]
@@ -245,6 +251,8 @@ def fig_ipums_ngboost():
         ax.set_ylabel('Density')
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${x:,.0f}'))
 
+    dr.set_output_smoothing(output_smoothing=0)
+
     axes.flat[0].legend(fontsize=8)
     plt.suptitle('DistributionRegressor vs NGBoost (LogNormal) on IPUMS', fontsize=14, y=1.01)
     plt.tight_layout()
@@ -260,7 +268,7 @@ def fig_baseline_comparison():
     _, train, test, features, target = load_rossmann()
 
     common = dict(n_bins=100, n_estimators=1000, learning_rate=0.01,
-                  sigma='auto', random_state=42, monte_carlo_training=False)
+                  random_state=42)
 
     model_direct = DistributionRegressor(use_base_model=False, **common)
     model_direct.fit(train[features], train[target])
@@ -340,6 +348,9 @@ def fig_baseline_multimodal():
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
 
+    model_direct.set_output_smoothing(output_smoothing=1, atom_values=0)
+    model_baseline.set_output_smoothing(output_smoothing=1, atom_values=0)
+
     for ax, idx in zip(axes.flat, sample_idx):
         X_i = X_test[idx:idx+1]
         true_y = y_test[idx]
@@ -360,6 +371,9 @@ def fig_baseline_multimodal():
         ax.set_xlabel('Income')
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${x:,.0f}'))
 
+    model_direct.set_output_smoothing(output_smoothing=0)
+    model_baseline.set_output_smoothing(output_smoothing=0)
+
     axes.flat[0].legend(fontsize=9)
     plt.suptitle('Direct vs Baseline Mode - Income Distribution Shape', fontsize=14, y=1.01)
     plt.tight_layout()
@@ -374,20 +388,27 @@ def fig_mc_comparison():
     print("Generating mc_comparison.png ...")
     _, train, test, features, target = load_rossmann()
 
-    common = dict(n_bins=100, n_estimators=1000, learning_rate=0.01,
-                  sigma='auto', random_state=42, use_base_model=False)
+    lgbm_params = dict(n_bins=100, n_estimators=1000, learning_rate=0.01,
+                       random_state=42)
 
-    model_full = DistributionRegressor(monte_carlo_training=False, **common)
+    model_full = DistributionRegressor(use_base_model=False, monte_carlo_training=False, **lgbm_params)
     model_full.fit(train[features], train[target])
 
-    model_mc = DistributionRegressor(monte_carlo_training=True, mc_samples=5, **common)
+    model_mc = DistributionRegressor(use_base_model=False, monte_carlo_training=True, mc_samples=20, **lgbm_params)
     model_mc.fit(train[features], train[target])
+
+    model_base_mc = DistributionRegressor(use_base_model=True, monte_carlo_training=True, mc_samples=20, **lgbm_params)
+    model_base_mc.fit(train[features], train[target])
 
     np.random.seed(123)
     open_test = test[test['Closed'] == False]
     sample_indices = open_test.index[np.random.choice(len(open_test), 6, replace=False)]
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+
+    model_full.set_output_smoothing(output_smoothing=1, atom_values=0)
+    model_mc.set_output_smoothing(output_smoothing=1, atom_values=0)
+    model_base_mc.set_output_smoothing(output_smoothing=1, atom_values=0)
 
     for ax, idx in zip(axes.flat, sample_indices):
         row = test.loc[[idx]]
@@ -396,21 +417,29 @@ def fig_mc_comparison():
 
         grids_f, dists_f, _ = model_full.predict_distribution(row[features])
         grids_m, dists_m, _ = model_mc.predict_distribution(row[features])
+        grids_b, dists_b, _ = model_base_mc.predict_distribution(row[features])
 
         g_f, dens_f = plot_density(ax, grids_f, dists_f)
         g_m, dens_m = plot_density(ax, grids_m, dists_m)
+        g_b, dens_b = plot_density(ax, grids_b, dists_b)
 
         ax.plot(g_f, dens_f, color=BLUE, linewidth=1.8, label='Full grid', alpha=0.9)
-        ax.plot(g_m, dens_m, color=ORANGE, linewidth=1.8, label='MC (K=5)',
+        ax.plot(g_m, dens_m, color=ORANGE, linewidth=1.8, label='MC (K=20)',
                 linestyle='--', alpha=0.9)
+        ax.plot(g_b, dens_b, color=GREEN, linewidth=1.8, label='Base + MC (K=20)',
+                linestyle=':', alpha=0.9)
         ax.axvline(true_y, color=RED, linestyle=':', linewidth=1.2, alpha=0.6)
 
         ax.set_title(date_str, fontsize=10)
         ax.set_xlabel('Sales')
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{x:,.0f}'))
 
+    model_full.set_output_smoothing(output_smoothing=0)
+    model_mc.set_output_smoothing(output_smoothing=0)
+    model_base_mc.set_output_smoothing(output_smoothing=0)
+
     axes.flat[0].legend(fontsize=9)
-    plt.suptitle('Full Grid vs Monte Carlo Training - Same Model', fontsize=14, y=1.01)
+    plt.suptitle('Full Grid vs MC (K=20) vs Base+MC (K=20)', fontsize=14, y=1.01)
     plt.tight_layout()
     plt.savefig(os.path.join(IMG_DIR, 'mc_comparison.png'), dpi=150, bbox_inches='tight')
     plt.close()
@@ -428,11 +457,10 @@ if __name__ == '__main__':
     _, train, test, features, target = load_rossmann()
     df, _, _, _, _ = load_rossmann()
 
-    print("Training Rossmann model (use_base_model=True) ...")
+    print("Training Rossmann model (default settings) ...")
     rossmann_model = DistributionRegressor(
         n_bins=100, n_estimators=1000, learning_rate=0.01,
-        sigma='auto', random_state=42, monte_carlo_training=False,
-        use_base_model=True,
+        random_state=42,
     )
     rossmann_model.fit(train[features], train[target])
 
