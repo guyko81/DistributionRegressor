@@ -7,9 +7,9 @@ Run from the project root:
 Produces PNGs in docs/img/:
   - rossmann_timeseries.png   (zoomed to last 5 weeks of test)
   - rossmann_densities.png    (open days only - promo vs normal)
-  - ipums_ngboost.png         (DistReg vs NGBoost LogNormal overlay)
+  - california_ngboost.png    (DistReg vs NGBoost Normal on California Housing)
   - baseline_comparison.png   (calibration + RMSE)
-  - baseline_multimodal.png   (direct vs baseline on IPUMS - multimodal)
+  - baseline_multimodal.png   (direct vs baseline on California Housing)
   - mc_comparison.png         (full grid vs MC)
 """
 
@@ -72,16 +72,12 @@ def load_rossmann():
     return df, train, test, features, target
 
 
-def load_ipums():
-    data_path = os.path.join(os.path.dirname(__file__), '..', '..', 'distreg', 'ipums_data.csv')
-    if not os.path.exists(data_path):
-        return None
-    df = pd.read_csv(data_path)
-    target_col = 'INCTOT'
-    weight_col = 'ASECWT'
-    feature_cols = [c for c in df.columns if c not in [target_col, weight_col]]
-    X = df[feature_cols].values
-    y = df[target_col].values
+def load_california():
+    from sklearn.datasets import fetch_california_housing
+    data = fetch_california_housing()
+    X, y = data.data, data.target
+    # Target is median house value in $100k; convert to $k for readability
+    y = y * 100
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     return X_train, X_test, y_train, y_test
 
@@ -191,15 +187,11 @@ def fig_rossmann_densities(model, test, features, target):
 
 
 # ===================================================================
-# 3. IPUMS: DistReg vs NGBoost LogNormal
+# 3. California Housing: DistReg vs NGBoost Normal
 # ===================================================================
-def fig_ipums_ngboost():
-    print("Generating ipums_ngboost.png ...")
-    data = load_ipums()
-    if data is None:
-        print("  SKIP: IPUMS data not found")
-        return
-    X_train, X_test, y_train, y_test = data
+def fig_california_ngboost():
+    print("Generating california_ngboost.png ...")
+    X_train, X_test, y_train, y_test = load_california()
 
     # Fit DistributionRegressor
     dr = DistributionRegressor(
@@ -208,16 +200,16 @@ def fig_ipums_ngboost():
     )
     dr.fit(X_train, y_train)
 
-    # Fit NGBoost LogNormal
+    # Fit NGBoost Normal
     from ngboost import NGBRegressor
-    from ngboost.distns import LogNormal
-    from scipy.stats import lognorm
+    from ngboost.distns import Normal
+    from scipy.stats import norm
 
     ngb = NGBRegressor(
-        Dist=LogNormal, n_estimators=1000, learning_rate=0.05,
+        Dist=Normal, n_estimators=1000, learning_rate=0.05,
         minibatch_frac=0.8, random_state=42, verbose=False,
     )
-    ngb.fit(X_train, y_train + 1)  # LogNormal needs positive values
+    ngb.fit(X_train, y_train)
     ngb_dists = ngb.pred_dist(X_test)
 
     np.random.seed(42)
@@ -225,7 +217,7 @@ def fig_ipums_ngboost():
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
 
-    dr.set_output_smoothing(output_smoothing=1, atom_values=0)
+    dr.set_output_smoothing(output_smoothing=1)
 
     for ax, idx in zip(axes.flat, sample_idx):
         X_i = X_test[idx:idx+1]
@@ -237,26 +229,26 @@ def fig_ipums_ngboost():
         ax.fill_between(g, density, alpha=0.25, color=BLUE)
         ax.plot(g, density, color=BLUE, linewidth=1.8, label='DistReg')
 
-        # NGBoost LogNormal density
-        ngb_s = ngb_dists.params['s'][idx]
+        # NGBoost Normal density
+        ngb_loc = ngb_dists.params['loc'][idx]
         ngb_scale = ngb_dists.params['scale'][idx]
-        y_plot = np.linspace(max(0.1, g.min()), g.max(), 500)
-        ngb_pdf = lognorm.pdf(y_plot + 1, ngb_s, scale=ngb_scale)
-        ax.plot(y_plot, ngb_pdf, color=GREEN, linewidth=1.8, linestyle='--', label='NGBoost (LogN)')
+        y_plot = np.linspace(g.min(), g.max(), 500)
+        ngb_pdf = norm.pdf(y_plot, loc=ngb_loc, scale=ngb_scale)
+        ax.plot(y_plot, ngb_pdf, color=GREEN, linewidth=1.8, linestyle='--', label='NGBoost (Normal)')
 
         ax.axvline(true_y, color=RED, linestyle=':', linewidth=1.5, alpha=0.7,
-                   label=f'true = ${true_y:,.0f}')
+                   label=f'true = ${true_y:,.0f}k')
         ax.set_title(f'Test sample {idx}', fontsize=10)
-        ax.set_xlabel('Income')
+        ax.set_xlabel('House Value ($k)')
         ax.set_ylabel('Density')
-        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${x:,.0f}'))
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${x:,.0f}k'))
 
     dr.set_output_smoothing(output_smoothing=0)
 
     axes.flat[0].legend(fontsize=8)
-    plt.suptitle('DistributionRegressor vs NGBoost (LogNormal) on IPUMS', fontsize=14, y=1.01)
+    plt.suptitle('DistributionRegressor vs NGBoost (Normal) on California Housing', fontsize=14, y=1.01)
     plt.tight_layout()
-    plt.savefig(os.path.join(IMG_DIR, 'ipums_ngboost.png'), dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(IMG_DIR, 'california_ngboost.png'), dpi=150, bbox_inches='tight')
     plt.close()
 
 
@@ -324,15 +316,11 @@ def fig_baseline_comparison():
 
 
 # ===================================================================
-# 5. BASELINE MULTIMODAL - shows baseline losing distribution shape
+# 5. BASELINE COMPARISON on California Housing - distribution shape
 # ===================================================================
 def fig_baseline_multimodal():
     print("Generating baseline_multimodal.png ...")
-    data = load_ipums()
-    if data is None:
-        print("  SKIP: IPUMS data not found")
-        return
-    X_train, X_test, y_train, y_test = data
+    X_train, X_test, y_train, y_test = load_california()
 
     common = dict(n_bins=200, n_estimators=1000, learning_rate=0.05,
                   subsample=0.8, random_state=42)
@@ -348,8 +336,8 @@ def fig_baseline_multimodal():
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
 
-    model_direct.set_output_smoothing(output_smoothing=1, atom_values=0)
-    model_baseline.set_output_smoothing(output_smoothing=1, atom_values=0)
+    model_direct.set_output_smoothing(output_smoothing=1)
+    model_baseline.set_output_smoothing(output_smoothing=1)
 
     for ax, idx in zip(axes.flat, sample_idx):
         X_i = X_test[idx:idx+1]
@@ -368,14 +356,14 @@ def fig_baseline_multimodal():
 
         ax.axvline(true_y, color=RED, linestyle=':', linewidth=1.2, alpha=0.7)
         ax.set_title(f'Test sample {idx}', fontsize=10)
-        ax.set_xlabel('Income')
-        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${x:,.0f}'))
+        ax.set_xlabel('House Value ($k)')
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${x:,.0f}k'))
 
     model_direct.set_output_smoothing(output_smoothing=0)
     model_baseline.set_output_smoothing(output_smoothing=0)
 
     axes.flat[0].legend(fontsize=9)
-    plt.suptitle('Direct vs Baseline Mode - Income Distribution Shape', fontsize=14, y=1.01)
+    plt.suptitle('Direct vs Baseline Mode - California Housing', fontsize=14, y=1.01)
     plt.tight_layout()
     plt.savefig(os.path.join(IMG_DIR, 'baseline_multimodal.png'), dpi=150, bbox_inches='tight')
     plt.close()
@@ -468,7 +456,7 @@ if __name__ == '__main__':
     fig_rossmann_densities(rossmann_model, test, features, target)
     fig_baseline_comparison()
     fig_mc_comparison()
-    fig_ipums_ngboost()
+    fig_california_ngboost()
     fig_baseline_multimodal()
 
     print("=" * 60)

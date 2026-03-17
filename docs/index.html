@@ -996,7 +996,7 @@ model.<span class="fn">set_output_smoothing</span>(output_smoothing=<span class=
 
   <div class="sub-nav" id="examples-sub-nav">
     <a class="active" onclick="showSubPage('examples', 'rossmann')">Rossmann Store Sales</a>
-    <a onclick="showSubPage('examples', 'ipums')">IPUMS Income (vs NGBoost)</a>
+    <a onclick="showSubPage('examples', 'california')">California Housing (vs NGBoost)</a>
   </div>
 
   <!-- Sub-page: Rossmann -->
@@ -1052,47 +1052,44 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
     </section>
   </div>
 
-  <!-- Sub-page: IPUMS -->
-  <div id="examples-ipums" class="sub-page">
+  <!-- Sub-page: California Housing -->
+  <div id="examples-california" class="sub-page">
     <section class="section-padding">
       <div class="container">
-        <h2>IPUMS Income Distribution</h2>
+        <h2>California Housing (vs NGBoost)</h2>
         <p class="section-lead">
-          Predicting the full income distribution conditional on demographic features (26 variables, 113k samples).
+          Predicting the full house value distribution conditional on location and census features (8 features, 20,640 samples).
           Compared against NGBoost on test-set negative log-likelihood.
         </p>
 
         <h3>Benchmark results</h3>
         <table>
           <thead>
-            <tr><th>Method</th><th>Test NLL</th><th>Weighted NLL</th></tr>
+            <tr><th>Method</th><th>Test NLL</th></tr>
           </thead>
           <tbody>
             <tr>
               <td><strong>DistributionRegressor</strong></td>
-              <td>11.19</td>
-              <td>11.21</td>
+              <td><strong>4.74</strong></td>
             </tr>
             <tr>
-              <td>NGBoost (LogNormal)</td>
-              <td><strong>11.11</strong></td>
-              <td><strong>11.14</strong></td>
+              <td>NGBoost (Normal)</td>
+              <td>5.16</td>
             </tr>
           </tbody>
         </table>
 
         <div class="highlight-box">
-          <strong>Key takeaway:</strong> DistributionRegressor achieves NLL within 0.08 nats of NGBoost
+          <strong>Key takeaway:</strong> DistributionRegressor outperforms NGBoost (Normal) by 0.42 nats on California Housing,
           without requiring any distributional assumptions.
-          NGBoost edges ahead on NLL here because income is approximately log-normal and it uses the matching LogNormal
-          parametric family - a strong inductive bias when it happens to match the true distribution.
+          House value distributions are often multimodal and bounded, which violates the Normal assumption that NGBoost relies on.
         </div>
 
         <h3>The limitation of parametric models</h3>
         <p>
-          However, NGBoost's strength is also its weakness. With a LogNormal distribution, every prediction is
-          forced into a unimodal, right-skewed shape. When the true conditional distribution is multimodal or
-          has a complex shape, the parametric assumption breaks down.
+          NGBoost with a Normal distribution forces every prediction into a symmetric, unimodal bell curve.
+          When the true conditional distribution is multimodal, skewed, or bounded,
+          the parametric assumption breaks down and wastes probability mass on impossible values.
         </p>
         <p style="margin-top: 12px;">
           NGBoost can use more complex parametric families to mitigate this, but the user must choose the right
@@ -1100,11 +1097,11 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
         </p>
 
         <figure class="figure">
-          <img src="img/ipums_ngboost.png" alt="DistributionRegressor vs NGBoost on IPUMS data">
+          <img src="img/california_ngboost.png" alt="DistributionRegressor vs NGBoost on California Housing data">
           <figcaption>
-            DistributionRegressor (blue) captures multimodal and complex conditional densities that
-            NGBoost's LogNormal (green dashed) cannot represent. The parametric model is forced into a
-            single-mode shape regardless of the true data distribution.
+            DistributionRegressor (blue) captures complex conditional densities that
+            NGBoost's Normal (green dashed) cannot represent. The parametric model is forced into a
+            symmetric bell curve regardless of the true data distribution.
           </figcaption>
         </figure>
       </div>
@@ -1231,7 +1228,7 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
 
         <h3>Distribution shape on multimodal data</h3>
         <p>
-          On IPUMS income data - where conditional distributions can be multimodal - both modes
+          On California Housing data - where conditional distributions can be multimodal - both modes
           capture the overall shape, but the baseline model can shift or smooth out fine structure
           due to the residual centering:
         </p>
@@ -1239,7 +1236,7 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
         <figure class="figure">
           <img src="img/baseline_multimodal.png" alt="Direct vs baseline on multimodal data">
           <figcaption>
-            Direct model (blue) vs. baseline model (orange dashed) on IPUMS income data.
+            Direct model (blue) vs. baseline model (orange dashed) on California Housing data.
             Both capture the overall distribution shape, but the baseline model can introduce
             subtle shifts and smoothing artifacts from the residual transformation.
           </figcaption>
@@ -1392,7 +1389,7 @@ model = DistributionRegressor(
               <td>100</td>
             </tr>
             <tr>
-              <td>Wide range or fine structure (income, medical costs)</td>
+              <td>Wide range or fine structure (house prices, medical costs)</td>
               <td>150&ndash;200</td>
             </tr>
             <tr>
