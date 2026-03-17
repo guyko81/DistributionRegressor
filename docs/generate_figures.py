@@ -76,8 +76,8 @@ def load_california():
     from sklearn.datasets import fetch_california_housing
     data = fetch_california_housing()
     X, y = data.data, data.target
-    # Target is median house value in $100k; convert to $k for readability
-    y = y * 100
+    # Target is median house value in $100k (sklearn default)
+    # Keep original scale for comparable NLL values
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     return X_train, X_test, y_train, y_test
 
@@ -237,11 +237,11 @@ def fig_california_ngboost():
         ax.plot(y_plot, ngb_pdf, color=GREEN, linewidth=1.8, linestyle='--', label='NGBoost (Normal)')
 
         ax.axvline(true_y, color=RED, linestyle=':', linewidth=1.5, alpha=0.7,
-                   label=f'true = ${true_y:,.0f}k')
+                   label=f'true = {true_y:.2f}')
         ax.set_title(f'Test sample {idx}', fontsize=10)
-        ax.set_xlabel('House Value ($k)')
+        ax.set_xlabel('House Value ($100k)')
         ax.set_ylabel('Density')
-        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${x:,.0f}k'))
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{x:.1f}'))
 
     dr.set_output_smoothing(output_smoothing=0)
 
@@ -356,8 +356,8 @@ def fig_baseline_multimodal():
 
         ax.axvline(true_y, color=RED, linestyle=':', linewidth=1.2, alpha=0.7)
         ax.set_title(f'Test sample {idx}', fontsize=10)
-        ax.set_xlabel('House Value ($k)')
-        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'${x:,.0f}k'))
+        ax.set_xlabel('House Value ($100k)')
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{x:.1f}'))
 
     model_direct.set_output_smoothing(output_smoothing=0)
     model_baseline.set_output_smoothing(output_smoothing=0)

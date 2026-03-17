@@ -1070,11 +1070,11 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
           <tbody>
             <tr>
               <td><strong>DistributionRegressor</strong></td>
-              <td><strong>4.74</strong></td>
+              <td><strong>0.14</strong></td>
             </tr>
             <tr>
               <td>NGBoost (Normal)</td>
-              <td>5.16</td>
+              <td>0.56</td>
             </tr>
           </tbody>
         </table>
@@ -1083,6 +1083,7 @@ p90 = model.<span class="fn">predict_quantile</span>(X, <span class="num">0.9</s
           <strong>Key takeaway:</strong> DistributionRegressor outperforms NGBoost (Normal) by 0.42 nats on California Housing,
           without requiring any distributional assumptions.
           House value distributions are often multimodal and bounded, which violates the Normal assumption that NGBoost relies on.
+          Target is median house value in $100k (sklearn default scale).
         </div>
 
         <h3>The limitation of parametric models</h3>
