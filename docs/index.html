@@ -839,12 +839,16 @@ model.<span class="fn">set_output_smoothing</span>(output_smoothing=<span class=
             <td><code>monte_carlo_training</code></td><td><code>False</code></td>
             <td>If True, samples a small number of grid points per training sample instead of using the full grid.
                 Reduces memory from <code>n &times; n_bins</code> to <code>n &times; mc_samples</code>.
-                This is an approximation - use only when memory is a constraint.</td>
+                Use with <code>mc_resample_freq</code> for better quality.</td>
           </tr>
           <tr>
             <td><code>mc_samples</code></td><td>5</td>
-            <td>Number of grid points per sample when <code>monte_carlo_training=True</code>. Higher values (e.g., 20)
-                give better approximations. Always a quality trade-off vs. full grid.</td>
+            <td>Number of grid points per sample when <code>monte_carlo_training=True</code>. 20 is a good default.</td>
+          </tr>
+          <tr>
+            <td><code>mc_resample_freq</code></td><td>100</td>
+            <td>Resample MC grid points every this many trees. Lower values give better grid coverage
+                (like SGD over threshold space). 100 is a good default; 10 gives the best quality.</td>
           </tr>
         </tbody>
       </table>
@@ -884,6 +888,7 @@ model.<span class="fn">set_output_smoothing</span>(output_smoothing=<span class=
     use_base_model=<span class="num">False</span>,     <span class="com"># advanced: learn residual distribution</span>
     monte_carlo_training=<span class="num">False</span>,<span class="com"># advanced: memory-efficient MC sampling</span>
     mc_samples=<span class="num">5</span>,             <span class="com"># advanced: MC points per sample</span>
+    mc_resample_freq=<span class="num">100</span>,     <span class="com"># advanced: resample grid points every N trees</span>
     **kwargs                  <span class="com"># passed to LGBMRegressor</span>
 )</pre>
 
@@ -1258,38 +1263,37 @@ model = DistributionRegressor(
       <div class="container">
         <h2>Monte Carlo Training (<code>monte_carlo_training</code>)</h2>
 
-        <div class="highlight-box amber">
-          <strong>Monte Carlo training is an approximation.</strong>
-          Full grid training (the default) gives the highest quality results. Monte Carlo training
-          reduces memory usage significantly but produces noticeably different distributions.
-          Use it only when memory is a binding constraint.
-        </div>
-
         <p class="section-lead">
           By default, the training set is expanded to <code>n_samples &times; n_bins</code> rows: every sample is
-          paired with every grid point. Monte Carlo training instead samples a small number of grid points per
-          sample, reducing the expanded dataset size dramatically - at the cost of distribution quality.
+          paired with every grid point. Monte Carlo training instead samples <code>mc_samples</code> uniform
+          grid points per sample, reducing peak memory significantly. With periodic resampling
+          (<code>mc_resample_freq</code>), different groups of trees train on different random grid points,
+          improving coverage of the threshold space.
         </p>
 
         <h3>How it works</h3>
         <p>
-          For each training sample, Monte Carlo mode selects <code>mc_samples</code> threshold points:
+          For each training sample, <code>mc_samples</code> threshold points are drawn uniformly from the
+          grid range. The <code>mc_resample_freq</code> parameter controls how often fresh points are drawn:
         </p>
         <ul style="padding-left: 20px; color: var(--text-muted); margin: 12px 0;">
-          <li><strong>Point 0:</strong> The exact target value y<sub>i</sub> (the CDF transition point)</li>
-          <li><strong>Points 1&ndash;K:</strong> Uniformly sampled from the grid range</li>
+          <li><strong>mc_resample_freq=100</strong> (default): Resample every 100 trees.
+              With 1000 trees, the model trains on 10 different random grids. Low overhead.</li>
+          <li><strong>mc_resample_freq=10</strong>: Resample every 10 trees. More grid coverage,
+              but higher overhead from repeated dataset construction and LightGBM <code>init_model</code> calls.</li>
         </ul>
         <p>
-          Because each sample only sees K grid points instead of all <code>n_bins</code>, the model receives
-          a sparser training signal. The overall shape is preserved, but fine details of the distribution
-          - peak height, tail behavior, sharpness - can differ from the full grid result.
+          Resampling works via LightGBM's incremental training (<code>init_model</code>): each group
+          of trees continues from the previous model but trains on a freshly sampled expanded dataset.
+          The idea is analogous to mini-batch SGD &mdash; each batch of trees sees a different
+          random slice of the threshold space.
         </p>
 
         <h3>Memory comparison</h3>
         <div class="comparison">
           <div>
             <h4><code>monte_carlo_training=False</code> (default)</h4>
-            <p>Each sample is crossed with <em>all</em> grid points. Best quality.</p>
+            <p>Each sample is crossed with <em>all</em> grid points.</p>
             <p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
               100k samples &times; 100 bins = <strong>10M rows</strong>
             </p>
@@ -1299,7 +1303,7 @@ model = DistributionRegressor(
           </div>
           <div>
             <h4><code>monte_carlo_training=True</code></h4>
-            <p>Each sample gets <code>mc_samples</code> sampled points. Approximate.</p>
+            <p>Each sample gets <code>mc_samples</code> points per resampling round.</p>
             <p style="margin-top: 8px; font-size: 0.9rem; color: var(--text-muted);">
               100k samples &times; 20 MC points = <strong>2M rows</strong>
             </p>
@@ -1311,40 +1315,48 @@ model = DistributionRegressor(
 
         <h3>When to use it</h3>
         <p>
-          Use Monte Carlo training only when the full grid expansion would exceed your available memory.
-          This typically happens with very large training sets (100k+ samples) combined with
-          high <code>n_bins</code> (100+). For small to medium datasets, full grid training is fast,
-          fits easily in memory, and should always be preferred.
+          MC training is useful when full grid expansion would exceed available memory &mdash;
+          typically with large training sets (100k+ samples) and high <code>n_bins</code> (100+).
+          For small to medium datasets, the full grid is simpler and fast enough.
         </p>
         <p style="margin-top: 12px;">
-          Higher <code>mc_samples</code> values (e.g., 20) give better approximations at the cost of more memory.
-          There is always a quality trade-off - if memory allows, use the full grid.
+          Resampling (<code>mc_resample_freq</code>) significantly improves MC quality compared to
+          single-shot MC. In our benchmarks on the Rossmann dataset, MC with <code>mc_resample_freq=10</code>
+          produced distributions visually close to the full grid, with comparable NLL.
+          Results may vary by dataset &mdash; we recommend comparing on your own data.
         </p>
 
-<pre><span class="com"># Full grid (default) - always prefer this when memory allows</span>
+<pre><span class="com"># Full grid (default) - simple, good for small/medium datasets</span>
 model = DistributionRegressor(n_bins=<span class="num">100</span>)
 
-<span class="com"># Monte Carlo - approximate, for large datasets where memory is tight</span>
+<span class="com"># MC with resampling - for large datasets where memory is tight</span>
 model = DistributionRegressor(
     monte_carlo_training=<span class="num">True</span>,
     mc_samples=<span class="num">20</span>,
+    mc_resample_freq=<span class="num">100</span>,   <span class="com"># resample grid points every 100 trees</span>
+    n_bins=<span class="num">100</span>,
+)
+
+<span class="com"># MC with frequent resampling - better grid coverage, more overhead</span>
+model = DistributionRegressor(
+    monte_carlo_training=<span class="num">True</span>,
+    mc_samples=<span class="num">20</span>,
+    mc_resample_freq=<span class="num">10</span>,    <span class="com"># resample every 10 trees</span>
     n_bins=<span class="num">100</span>,
 )</pre>
 
         <h3>Quality comparison</h3>
         <p>
-          Monte Carlo training preserves the overall distribution shape but differs in detail
-          from the full grid result. The chart below also shows the effect of combining
-          <code>use_base_model=True</code> with MC training, which produces narrower, shifted distributions:
+          The chart below compares the full grid against MC with two resampling frequencies
+          on the Rossmann dataset. With <code>mc_resample_freq=10</code>, MC closely tracks the
+          full grid distributions:
         </p>
 
         <figure class="figure">
-          <img src="img/mc_comparison.png" alt="Full grid vs MC vs Base+MC comparison">
+          <img src="img/mc_comparison.png" alt="Full grid vs MC resampling comparison">
           <figcaption>
-            Predicted densities on Rossmann test samples. Blue = full grid (reference),
-            orange dashed = MC with K=20 (approximate), green dotted = base model + MC with K=20
-            (narrower, shifted). MC training is a useful approximation when memory is constrained,
-            but full grid training should be preferred when feasible.
+            Predicted densities on Rossmann test samples. Blue = full grid,
+            orange = MC K=20 with freq=100, green = MC K=20 with freq=10.
           </figcaption>
         </figure>
       </div>
@@ -1401,8 +1413,9 @@ model = DistributionRegressor(
         </table>
         <p style="margin-top: 12px; color: var(--text-muted); font-size: 0.95rem;">
           Higher <code>n_bins</code> gives finer resolution but increases memory linearly.
-          If memory is tight, combine higher <code>n_bins</code> with <code>monte_carlo_training=True</code>,
-          but note this is an approximation (see <a href="#" onclick="showSubPage('options', 'montecarlo'); return false;">Monte Carlo Training</a>).
+          If memory is tight, combine higher <code>n_bins</code> with <code>monte_carlo_training=True</code>
+          and <code>mc_resample_freq</code>
+          (see <a href="#" onclick="showSubPage('options', 'montecarlo'); return false;">Monte Carlo Training</a>).
         </p>
 
         <h3>Step 3: Tune the LightGBM parameters</h3>

@@ -376,17 +376,22 @@ def fig_mc_comparison():
     print("Generating mc_comparison.png ...")
     _, train, test, features, target = load_rossmann()
 
-    lgbm_params = dict(n_bins=100, n_estimators=1000, learning_rate=0.01,
-                       random_state=42)
+    base_params = dict(n_bins=100, n_estimators=1000, learning_rate=0.01,
+                       random_state=42, use_base_model=False)
 
-    model_full = DistributionRegressor(use_base_model=False, monte_carlo_training=False, **lgbm_params)
-    model_full.fit(train[features], train[target])
+    configs = [
+        ('Full grid', dict(monte_carlo_training=False)),
+        ('MC freq=100', dict(monte_carlo_training=True, mc_samples=20, mc_resample_freq=100)),
+        ('MC freq=10', dict(monte_carlo_training=True, mc_samples=20, mc_resample_freq=10)),
+    ]
+    colors = [BLUE, ORANGE, GREEN]
 
-    model_mc = DistributionRegressor(use_base_model=False, monte_carlo_training=True, mc_samples=20, **lgbm_params)
-    model_mc.fit(train[features], train[target])
-
-    model_base_mc = DistributionRegressor(use_base_model=True, monte_carlo_training=True, mc_samples=20, **lgbm_params)
-    model_base_mc.fit(train[features], train[target])
+    models = {}
+    for label, kw in configs:
+        m = DistributionRegressor(**{**base_params, **kw})
+        m.fit(train[features], train[target])
+        m.set_output_smoothing(output_smoothing=1, atom_values=0)
+        models[label] = m
 
     np.random.seed(123)
     open_test = test[test['Closed'] == False]
@@ -394,40 +399,26 @@ def fig_mc_comparison():
 
     fig, axes = plt.subplots(2, 3, figsize=(14, 8))
 
-    model_full.set_output_smoothing(output_smoothing=1, atom_values=0)
-    model_mc.set_output_smoothing(output_smoothing=1, atom_values=0)
-    model_base_mc.set_output_smoothing(output_smoothing=1, atom_values=0)
-
     for ax, idx in zip(axes.flat, sample_indices):
         row = test.loc[[idx]]
         true_y = row[target].values[0]
         date_str = row['Date'].dt.strftime('%Y-%m-%d').values[0]
 
-        grids_f, dists_f, _ = model_full.predict_distribution(row[features])
-        grids_m, dists_m, _ = model_mc.predict_distribution(row[features])
-        grids_b, dists_b, _ = model_base_mc.predict_distribution(row[features])
+        for (label, m), color in zip(models.items(), colors):
+            grids, dists, _ = m.predict_distribution(row[features])
+            g, dens = plot_density(ax, grids, dists)
+            ax.plot(g, dens, color=color, linewidth=1.2, label=label, alpha=0.85)
 
-        g_f, dens_f = plot_density(ax, grids_f, dists_f)
-        g_m, dens_m = plot_density(ax, grids_m, dists_m)
-        g_b, dens_b = plot_density(ax, grids_b, dists_b)
-
-        ax.plot(g_f, dens_f, color=BLUE, linewidth=1.8, label='Full grid', alpha=0.9)
-        ax.plot(g_m, dens_m, color=ORANGE, linewidth=1.8, label='MC (K=20)',
-                linestyle='--', alpha=0.9)
-        ax.plot(g_b, dens_b, color=GREEN, linewidth=1.8, label='Base + MC (K=20)',
-                linestyle=':', alpha=0.9)
         ax.axvline(true_y, color=RED, linestyle=':', linewidth=1.2, alpha=0.6)
-
         ax.set_title(date_str, fontsize=10)
         ax.set_xlabel('Sales')
         ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{x:,.0f}'))
 
-    model_full.set_output_smoothing(output_smoothing=0)
-    model_mc.set_output_smoothing(output_smoothing=0)
-    model_base_mc.set_output_smoothing(output_smoothing=0)
+    for m in models.values():
+        m.set_output_smoothing(output_smoothing=0)
 
     axes.flat[0].legend(fontsize=9)
-    plt.suptitle('Full Grid vs MC (K=20) vs Base+MC (K=20)', fontsize=14, y=1.01)
+    plt.suptitle('Full Grid vs MC Resampling (K=20)', fontsize=14, y=1.01)
     plt.tight_layout()
     plt.savefig(os.path.join(IMG_DIR, 'mc_comparison.png'), dpi=150, bbox_inches='tight')
     plt.close()

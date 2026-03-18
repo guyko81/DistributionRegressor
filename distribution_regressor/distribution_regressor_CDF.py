@@ -41,6 +41,12 @@ class DistributionRegressorCDF(BaseEstimator, RegressorMixin):
         Number of threshold sample points per observation when
         monte_carlo_training=True.
 
+    mc_resample_freq : int, default=100
+        Resample MC grid points every this many trees. E.g. 1 means every
+        tree gets fresh grid points, 100 means resample every 100 trees.
+        Lower = better grid coverage but more overhead. Only used when
+        monte_carlo_training=True.
+
     output_smoothing : float, default=0
         Gaussian smoothing sigma (in grid-index units) applied to the CDF
         before deriving any outputs. Set to 0 to disable. Can be changed
@@ -71,6 +77,7 @@ class DistributionRegressorCDF(BaseEstimator, RegressorMixin):
         learning_rate=0.1,
         monte_carlo_training=False,
         mc_samples=5,
+        mc_resample_freq=100,
         output_smoothing=0,
         atom_values=None,
         random_state=None,
@@ -82,6 +89,7 @@ class DistributionRegressorCDF(BaseEstimator, RegressorMixin):
         self.learning_rate = learning_rate
         self.monte_carlo_training = monte_carlo_training
         self.mc_samples = mc_samples
+        self.mc_resample_freq = mc_resample_freq
         self.output_smoothing = output_smoothing
         self.atom_values = atom_values
         self.random_state = random_state
@@ -200,64 +208,63 @@ class DistributionRegressorCDF(BaseEstimator, RegressorMixin):
         self.grid_ = np.linspace(t_min, t_max, self.n_bins)
 
         # ------------------------------------------------------------------
-        # 4. Training Expansion
+        # 4. Training Expansion + Fitting
         # ------------------------------------------------------------------
         if self.use_base_model:
             r_min = np.maximum(t_min, self.y_min_ - oof_predictions)
             r_max = np.minimum(t_max, self.y_max_ - oof_predictions)
 
-        if self.monte_carlo_training:
-            K = self.mc_samples
-            rng = np.random.default_rng(self.random_state)
-            g_points = np.empty((n_samples, K))
+        use_mc = self.monte_carlo_training
+        K = self.mc_samples if use_mc else self.n_bins
+        freq = self.mc_resample_freq if use_mc else self.n_estimators
+        rng = np.random.default_rng(self.random_state) if use_mc else None
 
-            # Point 0: exact transition point (where CDF jumps from 0 to 1)
-            g_points[:, 0] = target_for_grid
+        # Monotone constraint: CDF must be non-decreasing in grid_point (last col)
+        n_cols = X_df.shape[1] + 1  # +1 for grid_point column
+        mono_constraints = [0] * (n_cols - 1) + [1]
 
-            # Remaining points: uniform over grid range
-            if self.use_base_model:
-                g_points[:, 1:] = (r_min[:, None]
-                                   + rng.uniform(size=(n_samples, K - 1))
-                                   * (r_max - r_min)[:, None])
-                g_points = np.clip(g_points, r_min[:, None], r_max[:, None])
-            else:
-                g_points[:, 1:] = rng.uniform(t_min, t_max, size=(n_samples, K - 1))
-
-            grid_points_flat = g_points.ravel()
-        else:
-            K = self.n_bins
-            if self.use_base_model:
-                per_sample_grids = self._per_sample_grids(oof_predictions)
-                grid_points_flat = per_sample_grids.ravel()
-            else:
-                grid_points_flat = np.tile(self.grid_, n_samples)
-
-        # Build expanded DataFrame
-        X_expanded = self._expand_with_grid_points(X_df, grid_points_flat, K)
-
-        # 5. CDF targets: z_ij = 1{y_i <= tau_j}
-        y_targets = (np.repeat(target_for_grid, K) <= grid_points_flat).astype(np.float64)
-
-        # 6. Train with logistic loss + monotone increasing constraint on grid_point
-        # grid_point is the last column; CDF must be non-decreasing in threshold
-        n_cols = X_expanded.shape[1]
-        mono_constraints = [0] * (n_cols - 1) + [1]  # +1 = increasing for grid_point
-
-        params = {
+        base_params = {
             'objective': 'cross_entropy',
             'metric': 'cross_entropy',
-            'n_estimators': self.n_estimators,
             'learning_rate': self.learning_rate,
             'random_state': self.random_state,
             'monotone_constraints': mono_constraints,
             'verbose': -1
         }
-        params.update(self.lgbm_kwargs)
+        base_params.update(self.lgbm_kwargs)
 
-        self.model_ = LGBMRegressor(**params)
+        self.model_ = None
+        trees_built = 0
 
-        sample_weight_expanded = np.repeat(sample_weight, K) if sample_weight is not None else None
-        self.model_.fit(X_expanded, y_targets, sample_weight=sample_weight_expanded)
+        while trees_built < self.n_estimators:
+            # Sample or build grid points
+            if use_mc:
+                if self.use_base_model:
+                    g_points = (r_min[:, None]
+                                + rng.uniform(size=(n_samples, K))
+                                * (r_max - r_min)[:, None])
+                    g_points = np.clip(g_points, r_min[:, None], r_max[:, None])
+                else:
+                    g_points = rng.uniform(t_min, t_max, size=(n_samples, K))
+                grid_points_flat = g_points.ravel()
+            else:
+                if self.use_base_model:
+                    grid_points_flat = self._per_sample_grids(oof_predictions).ravel()
+                else:
+                    grid_points_flat = np.tile(self.grid_, n_samples)
+
+            X_expanded = self._expand_with_grid_points(X_df, grid_points_flat, K)
+            y_targets = (np.repeat(target_for_grid, K) <= grid_points_flat).astype(np.float64)
+            sw_expanded = np.repeat(sample_weight, K) if sample_weight is not None else None
+
+            n_trees = min(freq, self.n_estimators - trees_built)
+
+            round_params = {**base_params, 'n_estimators': n_trees}
+            round_model = LGBMRegressor(**round_params)
+            round_model.fit(X_expanded, y_targets, sample_weight=sw_expanded,
+                            init_model=self.model_)
+            self.model_ = round_model
+            trees_built += n_trees
 
         return self
 

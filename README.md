@@ -66,6 +66,7 @@ DistributionRegressor(
     use_base_model=False,   # If True, learns residual CDF around a base LGBM prediction
     monte_carlo_training=False,  # If True, sample grid points instead of full expansion
     mc_samples=5,           # MC sample points per observation (when MC enabled)
+    mc_resample_freq=100,   # Resample grid points every N trees (lower = better coverage)
     n_estimators=100,       # LightGBM trees
     learning_rate=0.1,      # Learning rate
     random_state=42,        # Seed
