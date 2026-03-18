@@ -424,24 +424,32 @@ class DistributionRegressorCDF(BaseEstimator, RegressorMixin):
         rows = np.arange(len(y_residual))
         return (1 - alpha) * matrix[rows, idx_lo] + alpha * matrix[rows, idx_hi]
 
-    def predict_distribution(self, X):
+    def predict_distribution(self, X, cumulative=False):
         """
         Returns grid points and probability distribution for each sample.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Samples for which to predict distributions.
+        cumulative : bool, default=False
+            If False, return the PMF (probability mass per bin).
+            If True, return the CDF (cumulative distribution function).
 
         Returns
         -------
         grids : array of shape (n_samples, n_bins)
             Per-sample grid points in absolute space.
         distributions : array of shape (n_samples, n_bins)
-            Probability distribution for each sample.
+            PMF or CDF for each sample, depending on `cumulative`.
         base_offsets : array of shape (n_samples,)
             Per-sample base model prediction. Zeros when use_base_model=False.
         """
         grids, cdf_matrix = self._predict_cdf(X)
-        pmf = self._cdf_to_pmf(cdf_matrix)
+        dist = cdf_matrix if cumulative else self._cdf_to_pmf(cdf_matrix)
         base_offsets = self.base_model_.predict(self._to_dataframe(X)) if self.base_model_ is not None else np.zeros(len(grids))
         absolute_grids = grids + base_offsets[:, None]
-        return absolute_grids, pmf, base_offsets
+        return absolute_grids, dist, base_offsets
 
     def predict(self, X):
         """Default: Predict Mean"""
